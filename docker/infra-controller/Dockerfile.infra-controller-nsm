@@ -1,0 +1,80 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Infra Controller NVSwitch manager.
+# Build context: components/infra-controller/rest-api/
+
+# Build stage
+FROM registry.access.redhat.com/ubi10/go-toolset:latest AS builder
+
+ENV GIT_TERMINAL_PROMPT=1
+
+ARG skipcache=0
+
+USER root
+ENV CGO_ENABLED=0
+WORKDIR /workspace
+
+COPY go.mod go.sum ./
+COPY sdk/standard/go.mod ./sdk/standard/
+COPY proto/ ./proto/
+RUN --mount=type=cache,target=/root/go/pkg/mod   \
+    go mod download
+
+COPY common/ ./common/
+COPY nvswitch-manager/ ./nvswitch-manager/
+
+USER root
+ENV CGO_ENABLED=0
+WORKDIR /workspace/nvswitch-manager
+
+RUN --mount=type=cache,target=/root/go/pkg/mod   \
+    --mount=type=cache,target=/root/.cache/go-build   \
+    go build -ldflags "-extldflags '-static'" \
+    -o /app/nsm \
+    .
+
+# Install sshpass (requires RHEL repos via activation key)
+RUN --mount=type=secret,id=rhsm_org \
+    --mount=type=secret,id=rhsm_activationkey \
+    rm -f /etc/rhsm-host && \
+    trap 'subscription-manager unregister || true' EXIT && \
+    subscription-manager register \
+      --org="$(cat /run/secrets/rhsm_org)" \
+      --activationkey="$(cat /run/secrets/rhsm_activationkey)" && \
+    dnf install -y sshpass && dnf clean all
+
+# Runtime stage
+FROM registry.access.redhat.com/ubi10/ubi-minimal:latest
+
+RUN --mount=type=secret,id=rhsm_org \
+    --mount=type=secret,id=rhsm_activationkey \
+    rm -f /etc/rhsm-host && \
+    microdnf install -y --disablerepo='rhel-*' subscription-manager && \
+    trap 'subscription-manager unregister || true' EXIT && \
+    subscription-manager register \
+      --org="$(cat /run/secrets/rhsm_org)" \
+      --activationkey="$(cat /run/secrets/rhsm_activationkey)" && \
+    microdnf install -y \
+        bash \
+        openssh-clients \
+        iputils \
+    && microdnf clean all
+
+COPY --from=builder /usr/bin/sshpass /usr/bin/sshpass
+
+RUN mkdir -p /opt/nvswitch-manager
+
+WORKDIR /opt/nvswitch-manager
+
+COPY --from=builder /app/nsm /app/nsm
+COPY nvswitch-manager/scripts/ ./scripts/
+COPY nvswitch-manager/firmware/ ./firmware/
+
+RUN chmod +x scripts/*.sh
+
+USER 1001
+
+EXPOSE 50051
+
+ENTRYPOINT ["/app/nsm", "serve"]

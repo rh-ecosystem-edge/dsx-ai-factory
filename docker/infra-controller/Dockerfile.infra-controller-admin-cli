@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Infra Controller admin CLI — dedicated image for the Core admin gRPC CLI.
+#
+# The binary is COPYed from an already-built infra-controller-core image (no Rust rebuild).
+# INFRA_CONTROLLER_CORE_IMAGE defaults to the published Core image; override for local
+# testing, e.g.:
+#   podman build -f docker/infra-controller/Dockerfile.infra-controller-admin-cli \
+#     --build-arg INFRA_CONTROLLER_CORE_IMAGE=ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-core:latest \
+#     -t ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-admin-cli:latest .
+
+ARG INFRA_CONTROLLER_CORE_IMAGE=ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-core:latest
+
+FROM ${INFRA_CONTROLLER_CORE_IMAGE} AS core
+
+FROM registry.access.redhat.com/ubi10/ubi-micro:latest
+
+LABEL name="infra-controller-admin-cli" \
+      summary="Infra Controller Core admin CLI (gRPC, mTLS)" \
+      description="Standalone admin CLI for administering the Infra Controller Core gRPC API over mTLS from a workstation or bastion" \
+      io.k8s.display-name="Infra Controller admin CLI" \
+      io.k8s.description="Standalone Infra Controller Core admin CLI" \
+      com.redhat.component="infra-controller-admin-cli"
+
+COPY --from=core /opt/carbide/nico-admin-cli /usr/local/bin/nico-admin-cli
+
+USER 1001
+
+ENTRYPOINT ["/usr/local/bin/nico-admin-cli"]

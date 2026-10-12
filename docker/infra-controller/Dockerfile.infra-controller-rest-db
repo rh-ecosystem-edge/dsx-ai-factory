@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Infra Controller database migration runner.
+# Build context: components/infra-controller/rest-api/
+
+# Build stage
+FROM registry.access.redhat.com/ubi10/go-toolset:latest AS builder
+USER root
+ENV CGO_ENABLED=0
+WORKDIR /workspace
+
+COPY go.mod go.sum ./
+COPY sdk/standard/go.mod ./sdk/standard/
+RUN --mount=type=cache,target=/root/go/pkg/mod   \
+    go mod download
+
+COPY proto/ ./proto/
+COPY common/ ./common/
+COPY db/ ./db/
+COPY ipam/ ./ipam/
+
+USER root
+ENV CGO_ENABLED=0
+WORKDIR /workspace/db
+RUN --mount=type=cache,target=/root/go/pkg/mod   \
+    --mount=type=cache,target=/root/.cache/go-build   \
+    go build \
+        -ldflags "-extldflags '-static' -w -s" \
+        -o /app/migrations \
+        ./cmd/migrations
+
+# Runtime stage
+FROM registry.access.redhat.com/ubi10/ubi-micro:latest
+
+WORKDIR /app
+
+COPY --from=builder /app/migrations /app/migrations
+
+USER 1001
+
+CMD ["/app/migrations", "db", "init_migrate"]

@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Unbound — UBI-based recursive DNS resolver for the .forge compatibility zone.
+# Build context: docker/infra-controller/ (this directory, for unbound.conf)
+#
+# unbound is in the UBI appstream repo — no RHEL entitlement required.
+
+FROM registry.access.redhat.com/ubi10/ubi-minimal:latest
+
+RUN --mount=type=secret,id=rhsm_org \
+    --mount=type=secret,id=rhsm_activationkey \
+    rm -f /etc/rhsm-host && \
+    microdnf install -y --disablerepo='rhel-*' subscription-manager && \
+    trap 'subscription-manager unregister || true' EXIT && \
+    subscription-manager register \
+      --org="$(cat /run/secrets/rhsm_org)" \
+      --activationkey="$(cat /run/secrets/rhsm_activationkey)" && \
+    microdnf install -y unbound && \
+    microdnf clean all
+
+LABEL name="infra-controller-unbound" \
+      summary="Infra Controller .forge compatibility DNS resolver (unbound on UBI 10)" \
+      description="Recursive DNS resolver serving the upstream .forge zone and forwarding nico.local to nico-dns" \
+      io.k8s.display-name="Infra Controller unbound" \
+      io.k8s.description="Infra Controller .forge compatibility DNS resolver" \
+      com.redhat.component="infra-controller-unbound"
+
+COPY unbound.conf /etc/unbound/unbound.conf
+
+USER 1001
+
+EXPOSE 5353/udp 5353/tcp
+
+ENTRYPOINT ["/usr/sbin/unbound", "-d", "-c", "/etc/unbound/unbound.conf"]

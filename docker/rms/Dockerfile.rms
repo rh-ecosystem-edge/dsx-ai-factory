@@ -1,0 +1,85 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# RMS (Rack Management Service) — UBI-based image for the rack-manager API server.
+# Build context: components/nv-rms/
+#
+# Requires RHEL entitlements (Konflux provides them automatically).
+
+# --- Builder stage ---
+FROM registry.access.redhat.com/ubi10/ubi:latest AS builder
+
+RUN --mount=type=secret,id=rhsm_org \
+    --mount=type=secret,id=rhsm_activationkey \
+    rm -f /etc/rhsm-host && \
+    trap 'subscription-manager unregister || true' EXIT && \
+    subscription-manager register \
+      --org="$(cat /run/secrets/rhsm_org)" \
+      --activationkey="$(cat /run/secrets/rhsm_activationkey)" && \
+    subscription-manager repos --enable codeready-builder-for-rhel-10-x86_64-rpms && \
+    dnf install -y --allowerasing \
+      gcc gcc-c++ cmake clang \
+      perl perl-FindBin \
+      nasm \
+      git unzip curl \
+    && dnf clean all
+
+# Pinned Rust toolchain via rustup. Must match nv-rms rust-toolchain.toml.
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --default-toolchain 1.96.0
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# protoc for tonic build scripts (crates/rackmanagementservice/build.rs).
+# NOTE: RMS uses protoc 28.3, different from infra-controller (36.1).
+RUN curl -sLO https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protoc-28.3-linux-x86_64.zip && \
+    unzip protoc-28.3-linux-x86_64.zip -d /usr/local && \
+    rm protoc-28.3-linux-x86_64.zip
+
+WORKDIR /workspace
+COPY . .
+
+RUN rm -f rust-toolchain.toml
+
+RUN sed -i '/fuse-ld=lld/d' .cargo/config.toml || true
+
+ENV CARGO_PROFILE_RELEASE_LTO="thin"
+ENV CARGO_PROFILE_RELEASE_STRIP="symbols"
+ENV CARGO_PROFILE_RELEASE_DEBUG="false"
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/workspace/target \
+    cargo build --release --locked \
+        -p rackmanagementservice \
+        -p nvfwupd && \
+    mkdir -p /app/bin && \
+    cp target/release/rackmanagementservice /app/bin/ && \
+    cp target/release/nvfwupd /app/bin/
+
+# --- Runtime stage ---
+FROM registry.access.redhat.com/ubi10/ubi-minimal:latest
+
+RUN --mount=type=secret,id=rhsm_org \
+    --mount=type=secret,id=rhsm_activationkey \
+    rm -f /etc/rhsm-host && \
+    microdnf install -y --disablerepo='rhel-*' subscription-manager && \
+    trap 'subscription-manager unregister || true' EXIT && \
+    subscription-manager register \
+      --org="$(cat /run/secrets/rhsm_org)" \
+      --activationkey="$(cat /run/secrets/rhsm_activationkey)" && \
+    microdnf install -y ca-certificates ipmitool && \
+    microdnf clean all
+
+LABEL name="rms-api" \
+      summary="Rack Management Service — rack power/inventory/firmware/switch management" \
+      description="RMS API server (gRPC) plus the nvfwupd CLI for operator diagnostics" \
+      io.k8s.display-name="RMS API" \
+      io.k8s.description="NVIDIA Rack Management Service API server" \
+      com.redhat.component="rms-api"
+
+COPY --from=builder /app/bin/rackmanagementservice /usr/local/bin/rackmanagementservice
+COPY --from=builder /app/bin/nvfwupd /usr/local/bin/nvfwupd
+
+USER 1001
+
+EXPOSE 8801 8802
+
+ENTRYPOINT ["rackmanagementservice"]
