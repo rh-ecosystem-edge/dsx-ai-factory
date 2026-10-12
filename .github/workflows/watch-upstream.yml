@@ -45,7 +45,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
 
       - name: Check patch state
         id: patch
@@ -106,34 +106,28 @@ jobs:
           git -C "$SUBMODULE_PATH" checkout "$UPSTREAM_TAG"
           git add "$SUBMODULE_PATH"
 
-          git commit -s -m "${SUBMODULE_PATH}: switch back to upstream ${UPSTREAM_TAG}
-
-Upstream $UPSTREAM_REPO released $UPSTREAM_TAG while $COMPONENT was in patch
-state (previously at $CURRENT_TAG on a fork).
-
-Verify that patches/\$COMPONENT/ patches are included in this release, then
-merge this PR and remove the patch files in a follow-up commit."
+          printf '%s\n\n%s\n%s\n\n%s\n%s\n' \
+            "${SUBMODULE_PATH}: switch back to upstream ${UPSTREAM_TAG}" \
+            "Upstream ${UPSTREAM_REPO} released ${UPSTREAM_TAG} while ${COMPONENT} was in patch" \
+            "state (previously at ${CURRENT_TAG} on a fork)." \
+            "Verify that patches/${COMPONENT}/ patches are included in this release, then" \
+            "merge this PR and remove the patch files in a follow-up commit." \
+            | git commit -s -F -
 
           git push origin "$branch"
 
+          PR_BODY=$(printf '%s\n\n%s\n%s\n\n%s\n\n%s\n%s\n%s\n%s\n\n%s\n' \
+            "## Patch resolution candidate" \
+            "Upstream **${UPSTREAM_REPO}** released **${UPSTREAM_TAG}** while \`${COMPONENT}\` was" \
+            "in patch state (submodule was at \`${CURRENT_TAG}\` on a fork)." \
+            "### Before merging" \
+            "- [ ] Confirm patches in \`patches/${COMPONENT}/PATCHES.md\` are included in ${UPSTREAM_TAG}." \
+            "- [ ] Remove patch files under \`patches/${COMPONENT}/\` in a follow-up commit." \
+            "- [ ] Remove \`components/${COMPONENT}\` from \`matchDepNames\` in \`renovate.json\`." \
+            "" \
+            "This PR was opened automatically by \`watch-upstream.yml\`.")
           gh pr create \
             --title "${SUBMODULE_PATH}: switch back to upstream ${UPSTREAM_TAG}" \
-            --body "$(cat <<EOF
-## Patch resolution candidate
-
-Upstream **$UPSTREAM_REPO** released **$UPSTREAM_TAG** while \`$COMPONENT\` was
-in patch state (submodule was at \`$CURRENT_TAG\` on a fork).
-
-### Before merging
-
-- [ ] Confirm that all patches listed in \`patches/$COMPONENT/PATCHES.md\` are
-      included in $UPSTREAM_TAG (check upstream PR merge status).
-- [ ] Remove patch files under \`patches/$COMPONENT/\` in a follow-up commit.
-- [ ] Remove \`components/$COMPONENT\` from the \`matchDepNames\` disabled list
-      in \`renovate.json\` so Renovate resumes tracking this component.
-
-This PR was opened automatically by \`watch-upstream.yml\`.
-EOF
-)" \
+            --body "${PR_BODY}" \
             --label "patch-resolution" \
             --head "$branch"

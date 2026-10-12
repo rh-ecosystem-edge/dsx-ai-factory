@@ -105,6 +105,26 @@ release branch.
 - Follow the `<scope>: <summary>` commit message style, where `<scope>` is the component
   name or area (e.g., `components/nico`, `charts`, `docs`, `ci`).
 
+## Helm charts
+
+The `charts/dsx-ai-factory/` umbrella chart depends on component charts
+published as OCI artifacts to GHCR by the release pipeline. To work with
+the chart locally before a release has been published, push the component
+charts manually:
+
+```bash
+helm registry login ghcr.io -u <github-user> -p <token>
+for path in \
+  components/infra-controller/helm \
+  components/infra-controller/helm/rest/nico-rest \
+  components/nv-rms/helm; do
+  helm dependency build "$path" 2>/dev/null || true
+  pkg=$(helm package "$path" --destination /tmp/ | awk '{print $NF}')
+  helm push "$pkg" oci://ghcr.io/rh-ecosystem-edge/dsx-ai-factory/charts
+done
+helm dependency update charts/dsx-ai-factory/
+```
+
 ## CI pipelines
 
 | Workflow | Trigger | Purpose |

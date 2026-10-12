@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc.
+# SPDX-License-Identifier: Apache-2.0
+repos:
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+      - id: actionlint
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.37.0
+    hooks:
+      - id: yamllint
+        # Helm templates (charts/*/templates/) mix Go template syntax with YAML;
+        # yamllint cannot parse them. GitHub Actions workflows are covered by actionlint.
+        args: [-d, '{extends: default, rules: {line-length: {max: 120}, document-start: disable}}']
+        types: [yaml]
+        exclude: ^(\.github/|charts/.*/templates/)

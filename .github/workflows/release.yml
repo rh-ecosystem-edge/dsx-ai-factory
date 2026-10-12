@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Runs on push to a YY.MM release branch or a vYY.MM.* tag.
-# - Publishes container images to GHCR
-# - Publishes Helm charts to GHCR (OCI)
+# - Publishes container images to GHCR tagged with the component version
+#   (e.g. infra-controller-core:v2.2.0-rh.1 when patches are applied)
+# - Publishes Helm charts to GHCR (OCI) with image tags pinned in values.yaml
 # - Deploys Hugo docs to GitHub Pages
 
 name: Release
@@ -21,19 +22,119 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Publish container images
+  # Compute component versions
   # ---------------------------------------------------------------------------
-  publish-images:
+  versions:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    # TODO: define matrix over components once Dockerfiles exist under docker/
+    outputs:
+      infra_controller: ${{ steps.versions.outputs.infra_controller }}
+      nv_rms: ${{ steps.versions.outputs.nv_rms }}
+      nvsentinel: ${{ steps.versions.outputs.nvsentinel }}
+      fia: ${{ steps.versions.outputs.fia }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Compute versions
+        id: versions
+        run: |
+          component_version() {
+            local path="$1"
+            local name="$2"
+            # Get upstream base tag from the submodule
+            local tag
+            tag=$(git -C "$path" describe --tags --abbrev=0 2>/dev/null \
+              || git -C "$path" rev-parse --short HEAD)
+            # Append -rh.1 suffix when component is in patch state
+            if [ -s "patches/${name}/PATCHES.md" ]; then
+              echo "${tag}-rh.1"
+            else
+              echo "${tag}"
+            fi
+          }
+          echo "infra_controller=$(component_version components/infra-controller infra-controller)" >> "$GITHUB_OUTPUT"
+          echo "nv_rms=$(component_version components/nv-rms nv-rms)"                             >> "$GITHUB_OUTPUT"
+          echo "nvsentinel=$(component_version components/nvsentinel nvsentinel)"                  >> "$GITHUB_OUTPUT"
+          echo "fia=$(component_version components/fia fia)"                                       >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # Publish infra-controller images
+  # ---------------------------------------------------------------------------
+  publish-infra-controller:
+    needs: versions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.versions.outputs.infra_controller }}
+    strategy:
+      matrix:
+        image:
+          - name: infra-controller-rest-api
+            dockerfile: docker/infra-controller/Dockerfile.infra-controller-rest-api
+            context: components/infra-controller/rest-api/
+            rhsm: false
+            build_args: VERSION
+          - name: infra-controller-rest-cert-manager
+            dockerfile: docker/infra-controller/Dockerfile.infra-controller-rest-cert-manager
+            context: components/infra-controller/rest-api/
+            rhsm: false
+          - name: infra-controller-rest-db
+            dockerfile: docker/infra-controller/Dockerfile.infra-controller-rest-db
+            context: components/infra-controller/rest-api/
+            rhsm: false
+          - name: infra-controller-rest-site-agent
+            dockerfile: docker/infra-controller/Dockerfile.infra-controller-rest-site-agent
+            context: components/infra-controller/rest-api/
+            rhsm: false
+          - name: infra-controller-rest-site-manager
+            dockerfile: docker/infra-controller/Dockerfile.infra-controller-rest-site-manager
+            context: components/infra-controller/rest-api/
+            rhsm: false
+          - name: infra-controller-rest-workflow
+            dockerfile: docker/infra-controller/Dockerfile.infra-controller-rest-workflow
+            context: components/infra-controller/rest-api/
+            rhsm: false
+          - name: infra-controller-flow
+            dockerfile: docker/infra-controller/Dockerfile.infra-controller-flow
+            context: components/infra-controller/rest-api/
+            rhsm: false
+          - name: infra-controller-psm
+            dockerfile: docker/infra-controller/Dockerfile.infra-controller-psm
+            context: components/infra-controller/rest-api/
+            rhsm: false
+          - name: infra-controller-cli
+            dockerfile: docker/infra-controller/Dockerfile.infra-controller-cli
+            context: components/infra-controller/rest-api/
+            rhsm: false
+          - name: infra-controller-nsm
+            dockerfile: docker/infra-controller/Dockerfile.infra-controller-nsm
+            context: components/infra-controller/rest-api/
+            rhsm: true
+          - name: infra-controller-core
+            dockerfile: docker/infra-controller/Dockerfile.infra-controller-core
+            context: components/infra-controller/
+            rhsm: true
+            build_args: VERSION
+          - name: infra-controller-pxe
+            dockerfile: docker/infra-controller/Dockerfile.infra-controller-pxe
+            context: .
+            rhsm: true
+            build_args: VERSION
+          - name: unbound
+            dockerfile: docker/infra-controller/Dockerfile.unbound
+            context: docker/infra-controller/
+            rhsm: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -45,14 +146,114 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Publish images
-        run: |
-          echo "No Dockerfiles yet — add build/push steps as components are added."
+      - name: Build and push (no RHSM)
+        if: ${{ !matrix.image.rhsm }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
+          push: true
+          tags: ${{ env.IMAGE_REGISTRY }}/${{ matrix.image.name }}:${{ env.VERSION }}
+          build-args: ${{ matrix.image.build_args && format('VERSION={0}', env.VERSION) || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push (RHSM)
+        if: ${{ matrix.image.rhsm }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
+          push: true
+          tags: ${{ env.IMAGE_REGISTRY }}/${{ matrix.image.name }}:${{ env.VERSION }}
+          build-args: ${{ matrix.image.build_args && format('VERSION={0}', env.VERSION) || '' }}
+          secrets: |
+            rhsm_org=${{ secrets.RHSM_ORG }}
+            rhsm_activationkey=${{ secrets.RHSM_ACTIVATIONKEY }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   # ---------------------------------------------------------------------------
-  # Publish Helm charts
+  # Publish infra-controller-admin-cli (depends on core image)
   # ---------------------------------------------------------------------------
-  publish-charts:
+  publish-infra-controller-admin-cli:
+    needs: [versions, publish-infra-controller]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.versions.outputs.infra_controller }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          file: docker/infra-controller/Dockerfile.infra-controller-admin-cli
+          push: true
+          tags: ${{ env.IMAGE_REGISTRY }}/infra-controller-admin-cli:${{ env.VERSION }}
+          build-args: |
+            INFRA_CONTROLLER_CORE_IMAGE=${{ env.IMAGE_REGISTRY }}/infra-controller-core:${{ env.VERSION }}
+
+  # ---------------------------------------------------------------------------
+  # Publish nv-rms image
+  # ---------------------------------------------------------------------------
+  publish-nv-rms:
+    needs: versions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.versions.outputs.nv_rms }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: components/nv-rms/
+          file: docker/rms/Dockerfile.rms
+          push: true
+          tags: ${{ env.IMAGE_REGISTRY }}/nv-rms:${{ env.VERSION }}
+          secrets: |
+            rhsm_org=${{ secrets.RHSM_ORG }}
+            rhsm_activationkey=${{ secrets.RHSM_ACTIVATIONKEY }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # Publish component Helm charts as OCI artifacts
+  # These are the upstream charts (nico, nico-rest, rack-manager) published
+  # verbatim so the dsx-ai-factory umbrella can reference them via OCI rather
+  # than file:// paths.
+  # ---------------------------------------------------------------------------
+  publish-component-charts:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -61,7 +262,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
 
       - name: Set up Helm
         uses: azure/setup-helm@v4
@@ -73,11 +274,75 @@ jobs:
                 --username ${{ github.actor }} \
                 --password-stdin
 
-      - name: Package and push charts
+      - name: Package and push component charts
         run: |
+          mkdir -p /tmp/component-charts
+          push_chart() {
+            local path="$1"
+            helm dependency build "$path" 2>/dev/null || true
+            local pkg
+            pkg=$(helm package "$path" --destination /tmp/component-charts/ | awk '{print $NF}')
+            helm push "$pkg" "$CHART_REGISTRY"
+          }
+          push_chart components/infra-controller/helm
+          push_chart components/infra-controller/helm/rest/nico-rest
+          push_chart components/nv-rms/helm
+
+  # ---------------------------------------------------------------------------
+  # Publish dsx-ai-factory umbrella chart (image tags pinned in values.yaml)
+  # ---------------------------------------------------------------------------
+  publish-charts:
+    needs:
+      - versions
+      - publish-infra-controller
+      - publish-infra-controller-admin-cli
+      - publish-nv-rms
+      - publish-component-charts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login ghcr.io \
+                --username ${{ github.actor }} \
+                --password-stdin
+
+      - name: Pin image tags in chart values
+        env:
+          NICO_VERSION: ${{ needs.versions.outputs.infra_controller }}
+          RMS_VERSION: ${{ needs.versions.outputs.nv_rms }}
+          NVSENTINEL_VERSION: ${{ needs.versions.outputs.nvsentinel }}
+          FIA_VERSION: ${{ needs.versions.outputs.fia }}
+        run: |
+          # Update image tags in each chart's values.yaml before packaging
+          for chart in charts/*/; do
+            [ -f "$chart/values.yaml" ] || continue
+            sed -i \
+              -e "s|infra-controller-core:.*|infra-controller-core:${NICO_VERSION}|g" \
+              -e "s|nv-rms:.*|nv-rms:${RMS_VERSION}|g" \
+              -e "s|nvsentinel:.*|nvsentinel:${NVSENTINEL_VERSION}|g" \
+              -e "s|fleet-intelligence-agent:.*|fleet-intelligence-agent:${FIA_VERSION}|g" \
+              "$chart/values.yaml"
+          done
+
+      - name: Package and push umbrella chart
+        run: |
+          mkdir -p /tmp/charts
           for chart in charts/*/; do
             [ -f "$chart/Chart.yaml" ] || continue
-            helm dependency build "$chart" 2>/dev/null || true
+            # Pull component charts from OCI (published by publish-component-charts)
+            helm dependency update "$chart"
             pkg=$(helm package "$chart" --destination /tmp/charts/ | awk '{print $NF}')
             helm push "$pkg" "$CHART_REGISTRY"
           done
