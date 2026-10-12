@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # OCP CLI image used by post-install hook Jobs (wait-for-operators, setup-issuers).
-# Must have oc and /bin/sh. Override with a digest-pinned image for air-gapped clusters.
-ocpCliImage: "quay.io/openshift/origin-cli:latest"
+# When empty (default), the chart discovers the cluster version via the OpenShift
+# ClusterVersion API and uses quay.io/openshift/origin-cli:<major>.<minor>.
+# Set explicitly for air-gapped clusters or to pin a specific digest.
+ocpCliImage: ""
 
 certManager:
   enabled: true

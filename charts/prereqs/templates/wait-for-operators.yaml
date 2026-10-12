@@ -58,7 +58,7 @@ spec:
       serviceAccountName: {{ .Release.Name }}-wait-operators
       containers:
         - name: wait
-          image: {{ .Values.ocpCliImage }}
+          image: {{ include "dsx-ai-factory-prereqs.ocpCliImage" . | quote }}
           command:
             - /bin/sh
             - -c

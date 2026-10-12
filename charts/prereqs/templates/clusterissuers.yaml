@@ -80,7 +80,7 @@ spec:
       serviceAccountName: {{ .Release.Name }}-setup-issuers
       containers:
         - name: setup
-          image: {{ .Values.ocpCliImage }}
+          image: {{ include "dsx-ai-factory-prereqs.ocpCliImage" . | quote }}
           command:
             - /bin/sh
             - -c
