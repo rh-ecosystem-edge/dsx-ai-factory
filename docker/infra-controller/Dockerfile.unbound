@@ -11,7 +11,7 @@ FROM registry.access.redhat.com/ubi10/ubi-minimal:latest
 RUN --mount=type=secret,id=rhsm_org \
     --mount=type=secret,id=rhsm_activationkey \
     rm -f /etc/rhsm-host && \
-    microdnf install -y --disablerepo='rhel-*' subscription-manager && \
+    microdnf install -y subscription-manager && \
     trap 'subscription-manager unregister || true' EXIT && \
     subscription-manager register \
       --org="$(cat /run/secrets/rhsm_org)" \
