@@ -1,0 +1,65 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+# OCP CLI image used by post-install hook Jobs (wait-for-operators, setup-issuers).
+# Must have oc and /bin/sh. Override with a digest-pinned image for air-gapped clusters.
+ocpCliImage: "quay.io/openshift/origin-cli:latest"
+
+certManager:
+  enabled: true
+  channel: stable-v1
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic
+  namespace: cert-manager-operator
+
+crunchyPostgres:
+  enabled: true
+  channel: v5
+  source: certified-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic
+  namespace: openshift-operators
+
+rhbk:
+  enabled: true
+  channel: stable-v26
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic
+  namespace: rhbk-operator
+
+externalSecrets:
+  enabled: true
+  channel: stable-v1
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic
+  namespace: openshift-operators
+
+# MetalLB provides LoadBalancer VIPs for NICo site-facing services
+# (nico-api, nico-dhcp, nico-dns, nico-pxe, nico-ssh-console).
+# This block installs the operator and creates the singleton MetalLB instance.
+# Address pools, L2Advertisements, and BGP peers are configured separately.
+metallb:
+  enabled: true
+  channel: stable
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic
+  namespace: metallb-system
+
+# NMState is required for NodeNetworkConfigurationPolicy resources used to
+# configure static routes for provisioning, BMC, and back-plane networks.
+nmstate:
+  enabled: true
+  channel: stable
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic
+  namespace: openshift-nmstate
+
+# Self-signed ClusterIssuers for mTLS between NICo services.
+# For production, disable and configure Vault PKI or ACME issuers instead.
+clusterIssuers:
+  enabled: true

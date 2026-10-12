@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc.
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v2
+name: dsx-ai-factory-prereqs
+description: >-
+  Prerequisite operators for the DSX AI Factory management cluster.
+  Installs cert-manager, Crunchy PostgreSQL, RHBK, MetalLB, External Secrets,
+  and NMState operators via OLM, then waits for their CRDs to be established
+  and creates singleton operand instances where required.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

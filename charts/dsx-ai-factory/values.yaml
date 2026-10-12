@@ -1,0 +1,190 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Red Hat overrides for the upstream nico umbrella chart.
+# Image tags are pinned by release.yml via sed before helm package.
+#
+# Upstream chart reference:
+#   components/infra-controller/helm/
+
+# ---------------------------------------------------------------------------
+# RMS (rack-manager chart)
+# ---------------------------------------------------------------------------
+rack-manager:
+  global:
+    image:
+      tag: latest   # replaced by release.yml: nv-rms:.*
+      pullPolicy: IfNotPresent
+
+  apiServer:
+    image:
+      repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory/nv-rms
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+
+# ---------------------------------------------------------------------------
+# Core services (nico umbrella chart)
+# ---------------------------------------------------------------------------
+nico:
+  global:
+    image:
+      repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-core
+      tag: latest   # replaced by release.yml: infra-controller-core:.*
+      pullPolicy: IfNotPresent
+
+  unbound:
+    image:
+      repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory/unbound
+      tag: latest   # replaced by release.yml: unbound:.*
+
+  # OpenShift: restricted SCC requires non-root, no privilege escalation
+  # These defaults are overridable per subchart (fix/openshift-compatibility)
+  nico-api:
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+
+  nico-pxe:
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+
+  nico-dhcp:
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+
+  nico-flow:
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+
+# ---------------------------------------------------------------------------
+# REST services (nico-rest umbrella chart)
+# ---------------------------------------------------------------------------
+nico-rest:
+  nico-rest-api:
+    image:
+      repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-rest-api
+      tag: latest   # replaced by release.yml: infra-controller-rest-api:.*
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+
+  nico-rest-cert-manager:
+    image:
+      repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-rest-cert-manager
+      tag: latest   # replaced by release.yml: infra-controller-rest-cert-manager:.*
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+
+  nico-rest-db:
+    image:
+      repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-rest-db
+      tag: latest   # replaced by release.yml: infra-controller-rest-db:.*
+
+  nico-rest-site-agent:
+    image:
+      repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-rest-site-agent
+      tag: latest   # replaced by release.yml: infra-controller-rest-site-agent:.*
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+
+  nico-rest-site-manager:
+    image:
+      repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-rest-site-manager
+      tag: latest   # replaced by release.yml: infra-controller-rest-site-manager:.*
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+
+  nico-rest-workflow:
+    image:
+      repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-rest-workflow
+      tag: latest   # replaced by release.yml: infra-controller-rest-workflow:.*
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault

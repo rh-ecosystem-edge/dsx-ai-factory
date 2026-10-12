@@ -1,0 +1,43 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+
+MetalLB operator (Namespace + OperatorGroup + Subscription). The singleton
+MetalLB instance CR is created by the wait-for-operators hook once the CRDs are
+Established; the address pools / advertisements / BGP peers live in
+helm/infra-site (values.metallb), which is deployed after this chart.
+*/}}
+
+{{- if .Values.metallb.enabled }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.metallb.namespace }}
+  labels:
+    {{- include "dsx-ai-factory-prereqs.labels" . | nindent 4 }}
+  annotations:
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: metallb-operator
+  namespace: {{ .Values.metallb.namespace }}
+  labels:
+    {{- include "dsx-ai-factory-prereqs.labels" . | nindent 4 }}
+  annotations:
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: metallb-operator
+  namespace: {{ .Values.metallb.namespace }}
+  labels:
+    {{- include "dsx-ai-factory-prereqs.labels" . | nindent 4 }}
+  annotations:
+spec:
+  channel: {{ .Values.metallb.channel }}
+  name: metallb-operator
+  source: {{ .Values.metallb.source }}
+  sourceNamespace: {{ .Values.metallb.sourceNamespace }}
+  installPlanApproval: {{ .Values.metallb.installPlanApproval }}
+{{- end }}

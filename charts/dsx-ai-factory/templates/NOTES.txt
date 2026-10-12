@@ -1,0 +1,14 @@
+Red Hat build of NVIDIA Infra Controller (NICo) {{ .Chart.AppVersion }} installed.
+
+Release: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+Next steps:
+  1. Verify pods are running:
+       kubectl get pods -n {{ .Release.Namespace }}
+
+  2. Check the NICo API:
+       kubectl port-forward -n {{ .Release.Namespace }} svc/{{ .Release.Name }}-nico-rest-api 8388:8388
+
+For full deployment documentation see:
+  https://rh-ecosystem-edge.github.io/dsx-ai-factory

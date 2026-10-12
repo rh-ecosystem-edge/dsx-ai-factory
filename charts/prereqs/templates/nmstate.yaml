@@ -1,0 +1,45 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+
+NMState operator (Namespace + OperatorGroup + Subscription + NMState instance).
+Required for NodeNetworkConfigurationPolicy (NNCP) used to add static routes on
+the SNO node so pods can reach the provisioning, BMC and back networks via the ToR.
+*/}}
+
+{{- if .Values.nmstate.enabled }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.nmstate.namespace }}
+  labels:
+    {{- include "dsx-ai-factory-prereqs.labels" . | nindent 4 }}
+  annotations:
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: nmstate-operator
+  namespace: {{ .Values.nmstate.namespace }}
+  labels:
+    {{- include "dsx-ai-factory-prereqs.labels" . | nindent 4 }}
+  annotations:
+spec:
+  targetNamespaces:
+    - {{ .Values.nmstate.namespace }}
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: kubernetes-nmstate-operator
+  namespace: {{ .Values.nmstate.namespace }}
+  labels:
+    {{- include "dsx-ai-factory-prereqs.labels" . | nindent 4 }}
+  annotations:
+spec:
+  channel: {{ .Values.nmstate.channel }}
+  name: kubernetes-nmstate-operator
+  source: {{ .Values.nmstate.source }}
+  sourceNamespace: {{ .Values.nmstate.sourceNamespace }}
+  installPlanApproval: {{ .Values.nmstate.installPlanApproval }}
+{{- end }}
