@@ -119,6 +119,7 @@ jobs:
   build-pxe-image:
     runs-on: ubuntu-latest
     if: vars.HAS_RHSM == 'true'
+    continue-on-error: true  # mkosi requires unprivileged user namespaces; not available on standard runners
     steps:
       - name: Checkout
         uses: actions/checkout@v4
