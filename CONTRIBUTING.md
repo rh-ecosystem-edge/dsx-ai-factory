@@ -80,6 +80,7 @@ Renovate opens update PRs automatically. To update manually:
 ```bash
 git -C components/<component> fetch --tags
 git -C components/<component> checkout <new-tag>
+git -C components/<component> submodule update --init --recursive
 git add components/<component>
 git commit -s -m "components/<component>: update to <new-tag>"
 ```

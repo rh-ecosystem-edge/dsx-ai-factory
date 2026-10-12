@@ -1,0 +1,12 @@
+[submodule "components/nico"]
+	path = components/infra-controller
+	url = https://github.com/fabiendupont/nvidia-infra-controller
+[submodule "components/nvsentinel"]
+	path = components/nvsentinel
+	url = https://github.com/NVIDIA/NVSentinel
+[submodule "components/fia"]
+	path = components/fia
+	url = https://github.com/dsx-ai-factory/fleet-intelligence-agent
+[submodule "components/rms"]
+	path = components/nv-rms
+	url = https://github.com/fabiendupont/nv-rms

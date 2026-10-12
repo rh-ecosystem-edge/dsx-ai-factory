@@ -22,7 +22,7 @@
     {
       "description": "Components in patch state (tracking a fork). Renovate is disabled for these; watch-upstream.yml detects when the fix lands upstream. Add the submodule path (e.g. 'components/nico') when entering patch state; remove it when the patch is resolved.",
       "matchManagers": ["git-submodules"],
-      "matchDepNames": [],
+      "matchDepNames": ["components/infra-controller", "components/nv-rms"],
       "enabled": false
     },
     {

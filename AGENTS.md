@@ -5,18 +5,26 @@ the NVIDIA DSX AI Factory components.
 
 ## Components
 
-Each component lives as a git submodule under `components/`, pinned to an
-upstream release tag. Renovate opens bump PRs automatically when a new tag
-is available (unless the component is in patch state — see below).
+Components fall into two categories:
+
+**Built from source** — tracked as git submodules under `components/`, pinned to
+upstream release tags. Renovate opens bump PRs automatically (unless in patch state).
 
 | Directory | Component | Upstream |
 |-----------|-----------|---------|
-| `components/nico` | NVIDIA Infra Controller (NICo) | [dsx-ai-factory/infra-controller](https://github.com/dsx-ai-factory/infra-controller) |
-| `components/rms` | NVIDIA Rack Management Service (RMS) | [dsx-ai-factory/nv-rms](https://github.com/dsx-ai-factory/nv-rms) |
+| `components/infra-controller` | NVIDIA Infra Controller (NICo) | [dsx-ai-factory/infra-controller](https://github.com/dsx-ai-factory/infra-controller) |
+| `components/nv-rms` | NVIDIA Rack Management Service (RMS) | [dsx-ai-factory/nv-rms](https://github.com/dsx-ai-factory/nv-rms) |
 | `components/nvsentinel` | NVSentinel | [NVIDIA/NVSentinel](https://github.com/NVIDIA/NVSentinel) |
 | `components/fia` | NVIDIA Fleet Intelligence Agent | [dsx-ai-factory/fleet-intelligence-agent](https://github.com/dsx-ai-factory/fleet-intelligence-agent) |
-| `components/gpu-operator` | NVIDIA GPU Operator | [NVIDIA/gpu-operator](https://github.com/NVIDIA/gpu-operator) |
-| `components/network-operator` | NVIDIA Network Operator | [Mellanox/network-operator](https://github.com/Mellanox/network-operator) |
+
+**Deployed via OLM** — OpenShift-certified operators consumed from Red Hat's
+OperatorHub. No submodule; referenced by OLM `Subscription` manifests in the
+Helm charts.
+
+| Component | OLM package |
+|-----------|-------------|
+| NVIDIA GPU Operator | `gpu-operator-certified` |
+| NVIDIA Network Operator | `nvidia-network-operator` |
 
 ## Repository layout
 
