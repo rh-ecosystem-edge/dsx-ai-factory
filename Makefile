@@ -97,9 +97,10 @@ DATAPLANE_PREREQS_SET := \
 
 # Vault topology: auto-detected from schedulable node count (ha=>=3, standalone otherwise).
 # Force with VAULT_MODE=ha or VAULT_MODE=standalone.
-NODE_COUNT := $(shell oc get nodes -o json 2>/dev/null | \
+NODE_COUNT = $(shell _n=$$(oc get nodes -o json 2>/dev/null | \
   jq '[.items[] | select((.spec.unschedulable != true) and \
-  (([.spec.taints[]? | select(.effect=="NoSchedule" or .effect=="NoExecute")] | length) == 0))] | length' 2>/dev/null)
+  (([.spec.taints[]? | select(.effect=="NoSchedule" or .effect=="NoExecute")] | length) == 0))] | length' 2>/dev/null); \
+  [ -n "$$_n" ] && echo "$$_n" || echo "1")
 VAULT_MODE ?= $(if $(filter-out 0 1 2,$(NODE_COUNT)),ha,standalone)
 CRC_VAULT_OVERRIDES := --set vault.server.ha.enabled=false \
   --set vault.server.standalone.enabled=true \
@@ -125,7 +126,10 @@ API_URL := https://nico-rest-api-nico-rest.$(CLUSTER_DOMAIN)
 ADMIN_CERT_DIR := $(HOME)/.nico
 
 # Keycloak client secret — generated once per make session
-KEYCLOAK_CLIENT_SECRET := $(shell openssl rand -base64 32)
+KEYCLOAK_CLIENT_SECRET ?= $(shell \
+  _s=$$(oc get secret nico-rest-keycloak-client -n nico-rest \
+    -o jsonpath='{.data.client-secret}' 2>/dev/null | base64 -d 2>/dev/null); \
+  if [ -n "$$_s" ]; then echo "$$_s"; else openssl rand -base64 32; fi)
 
 # Site registration
 SITE_NAME        ?=
@@ -354,7 +358,9 @@ vault-init: ## Initialize Vault PKI, AppRole, and KV secrets (one-time per clust
 	CA_CERT=$$(oc get secret nico-root-ca-secret -n cert-manager -o jsonpath='{.data.tls\.crt}' | base64 -d) && \
 	CA_KEY=$$(oc get secret nico-root-ca-secret -n cert-manager -o jsonpath='{.data.tls\.key}' | base64 -d) && \
 	echo "$$CA_CERT" > /tmp/vault-ca-bundle.pem && echo "$$CA_KEY" >> /tmp/vault-ca-bundle.pem && \
-	oc cp /tmp/vault-ca-bundle.pem $$NS/$$V:/tmp/ca-bundle.pem -c vault && rm /tmp/vault-ca-bundle.pem && \
+	_VBUNDLE=$$(mktemp) && umask 077 && \
+	echo "$$CA_CERT" > $$_VBUNDLE && echo "$$CA_KEY" >> $$_VBUNDLE && \
+	{ oc cp $$_VBUNDLE $$NS/$$V:/tmp/ca-bundle.pem -c vault; _cp=$$?; rm -f $$_VBUNDLE; [ $$_cp -eq 0 ]; } && \
 	oc exec $$V -n $$NS -- sh -c "export VAULT_TOKEN=$$RT VAULT_SKIP_VERIFY=true && \
 		vault write nicoca/config/ca pem_bundle=@/tmp/ca-bundle.pem && \
 		vault write nicoca/roles/nico-cluster allow_any_name=true allowed_uri_sans='spiffe://*' max_ttl=720h ttl=720h key_type=ec key_bits=256 require_cn=false use_csr_common_name=true && \
