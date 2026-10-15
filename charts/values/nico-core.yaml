@@ -1,0 +1,340 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# Values override for upstream Core nico chart
+# Deployed in the nico-system namespace
+# =============================================================================
+
+global:
+  image:
+    # Single image shared by all Core services (nico-api, nico-dhcp, nico-dns,
+    # nico-hardware-health, nico-pxe, nico-ssh-console-rs, nico-bmc-proxy), built
+    # from docker/ubi/Dockerfile.nico-core and published by
+    # .github/workflows/build-images.yaml. pullPolicy inherits upstream's
+    # IfNotPresent; override with --set global.image.pullPolicy=Always for local
+    # tests that re-push :latest. Releases pin an immutable tag (see repo tags).
+    repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-core
+    tag: latest
+    pullPolicy: IfNotPresent
+  spiffe:
+    trustDomain: nico.local
+  certificate:
+    issuerRef:
+      kind: ClusterIssuer
+      name: vault-nico-issuer
+      group: cert-manager.io
+
+nico-api:
+  enabled: true
+  replicas: 1
+  # Drop the chart's default SYS_PTRACE capability (debug-backtraces only, and
+  # inert under OpenShift's non-root range UID anyway). Lets the pod run under
+  # restricted-v2 with no custom SCC. See docker/ubi/Dockerfile.nico-core
+  # (USER 1001) and upstream chart values containerSecurityContext.
+  containerSecurityContext: null
+  # Short backtraces (production-safe) instead of the chart default "full",
+  # which SYS_PTRACE was only ever needed to enrich.
+  env:
+    RUST_BACKTRACE: "1"
+  # Chart default (basic) is rejected outright: "CARBIDE_WEB_AUTH_TYPE=basic
+  # is not supported" (crates/api-web/src/lib.rs) — dropped upstream without
+  # the chart catching up.
+  webAuth:
+    mode: none
+  # Trust client certs issued by the site CA (CN=nico-root-ca) so
+  # nico-admin-cli can authenticate as ForgeAdminCLI via the internal
+  # RBAC layer. Pair with the nico-cli-client Vault PKI role created
+  # by vault-init and `make vault-admin-cert` to issue short-lived certs.
+  auth:
+    additionalIssuerCns:
+      - "nico-root-ca"
+  # No legacy carbide-api.forge-system clients in this deployment, and we
+  # don't otherwise own/create a forge-system namespace for the alias
+  # Service to live in (createNamespace defaults to false upstream).
+  legacyAlias:
+    enabled: false
+  # x86_64 boot artifacts (scout kernel, initrd, squashfs). Replace with
+  # your own image if targeting a different architecture or artifact set.
+  bootArtifactContainers:
+    - name: boot-artifacts-x86-64
+      image: quay.io/alosadag/boot-artifacts-x86_64:latest-amd64
+      command: ["sh", "-c", "cp -r /x86_64 /forge-boot-artifacts/blobs/internal"]
+    # - name: boot-artifacts-aarch64
+    #   image: <registry>/boot-artifacts-aarch64:latest
+    #   command: ["sh", "-c", "cp -r /aarch64 /apt /firmware /boot-artifacts/blobs/internal"]
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+  hostname: "nico.local"
+  # siteConfig is disabled in this base so `make deploy-site` never ships the
+  # RBAC/host-discovery bypass flags (bypass_rbac, permissive_mode,
+  # allow_insecure_discovery) required by the emulator. Supply a real
+  # site-config values file for a production site; for the no-hardware
+  # machine-a-tron flow layer helm/values/nico-core-mat.yaml
+  # (`make deploy-site MAT=1`, see machine-a-tron-testing-guide.md).
+  siteConfig:
+    enabled: false
+  envFrom:
+    vaultApproleTokens:
+      secretName: nico-vault-approle-tokens
+    vaultToken:
+      secretName: vault-unseal-secret
+    vaultClusterInfo:
+      configMapName: vault-cluster-info
+    # The fork (fix/openshift-compatibility) makes the key name configurable via
+    # nico-api.database.usernameKey. Set to 'user' below to match Crunchy PGO.
+    databaseCredentials:
+      secretName: nico-site-pg-migration-creds
+    databaseConfig:
+      configMapName: nico-system-nico-database-config
+    nicoWebHostname:
+      configMapName: nico-web-api-hostname
+  # Crunchy PGO emits 'user' not 'username'; upstream chart defaults to 'username'.
+  database:
+    usernameKey: user
+  migration:
+    pgIsReadyInit:
+      enabled: true
+  vaultClusterInfo:
+    VAULT_SERVICE: "https://vault.nico-system:8200"
+    NICO_VAULT_MOUNT: "secrets"
+    NICO_VAULT_PKI_MOUNT: "nicoca"
+  databaseConfig:
+    DB_HOST: "nico-site-pg-primary"
+    DB_PORT: "5432"
+    DB_NAME: "nico"
+
+nico-bmc-proxy:
+  enabled: true
+  replicas: 1
+  envFrom:
+    vaultApproleTokens:
+      secretName: nico-vault-approle-tokens
+    vaultToken:
+      secretName: vault-unseal-secret
+    vaultClusterInfo:
+      configMapName: vault-cluster-info
+    databaseCredentials:
+      secretName: nico-site-pg-pguser-nico
+    databaseConfig:
+      configMapName: nico-system-nico-database-config
+  database:
+    usernameKey: user
+nico-dhcp:
+  enabled: true
+  # nico-dhcp is the ONE Core service that cannot run on restricted-v2: kea must
+  # bind UDP port 67 (privileged, <1024) and cannot move ports the way nico-dns
+  # did (53 -> 5353). With the chart's `containerSecurityContext: null` (drop ALL
+  # caps) kea logs DHCPSRV_OPEN_SOCKET_FAIL / NO_SOCKETS_OPEN and becomes a
+  # zombie. It therefore needs NET_BIND_SERVICE AND must run as uid 0 for the cap
+  # to be *effective*: on modern CRI-O (post CVE-2022-27652) an added capability
+  # is no longer promoted to the ambient set, so a non-root process gets it only
+  # in CapBnd, never CapEff (verified on OCP 4.22: uid 1001 => CapEff=0; uid 0 =>
+  # CapEff=NET_BIND_SERVICE). This pairs with the custom SCC in
+  # helm/openshift/nico-dhcp-scc.yaml, which `make deploy-site` applies. This is
+  # the documented exception to the repo's "values-driven, no custom SCC" rule
+  # (every other service runs on restricted-v2 via `*SecurityContext: null`).
+  # A cleaner non-root posture is possible via file capabilities on the kea
+  # binary (setcap cap_net_bind_service=ep) in the image; tracked separately.
+  containerSecurityContext:
+    runAsUser: 0
+    allowPrivilegeEscalation: true
+    capabilities:
+      drop: [ALL]
+      add: [NET_BIND_SERVICE]
+  config:
+    kea:
+      # Chart default is a Debian path; our UBI image installs kea from
+      # ISC's repo (RHEL layout) — see docker/ubi/Dockerfile.nico-core.
+      hookLibraryPath: "/usr/lib64/kea/hooks/libdhcp.so"
+      # These are per-cluster values, NOT portable defaults: DHCP advertises
+      # them (option 6 / provisioning) to clients, so they must be the actual
+      # ClusterIPs of nico-dns/nico-pxe on THIS cluster
+      # (`oc get svc nico-dns nico-pxe -n nico-system`). Left as the chart's
+      # fail-loud placeholders here so a fresh `make deploy-site` cannot
+      # silently advertise a stale IP copied from another cluster. Override
+      # per-cluster; the machine-a-tron overlay (nico-core-mat.yaml) carries
+      # example values for the emulated flow.
+      hookParameters:
+        nameservers: "172.30.57.9"
+        # nico-ntp is disabled; reuse nico-dns's IP — just needs to parse
+        # as valid IPv4, nothing here depends on a real NTP server.
+        ntpServer: "172.30.57.9"
+        provisioningServer: "172.30.103.117"
+      # subnet4[].id isn't emitted by this chart at all; auto-numbered
+      # post-render instead (helm/plugins/kustomize-post-renderer/render.sh).
+      # Kea 3.0.4 requires it; upstream's own Kea 2.2.0 auto-assigns it and
+      # has never hit this. Worth a 1-line upstream fix to
+      # helm/charts/nico-dhcp/templates/_helpers.tpl's subnet4 loop.
+      subnet4:
+        - subnet: "0.0.0.0/0"
+          pools:
+            - "0.0.0.0-255.255.255.255"
+nico-dns:
+  enabled: true
+  replicas: 1
+  # Drop the chart's default SYS_PTRACE capability (see nico-api).
+  containerSecurityContext: null
+  # Port 53 needs CAP_NET_BIND_SERVICE, but this cluster's runtime doesn't
+  # propagate it to the ambient set for non-root exec (CapBnd has it,
+  # CapEff doesn't — confirmed via /proc/1/status), so bind() still fails
+  # with it granted. Moving off the privileged port avoids needing it.
+  listenAddress: "[::]:5353"
+  service:
+    # targetPort: the fork (fix/openshift-compatibility) now renders targetPort
+    # from values. Port 53 externally, 5353 inside the container.
+    targetPort: 5353
+    ports:
+      - port: 5353
+        name: tcp
+        protocol: TCP
+      - port: 5353
+        name: udp
+        protocol: UDP
+  # Disabled upstream — binary not ready for production (requires forge-roots
+  # volume mount not present in the chart template)
+nico-dsx-exchange-consumer:
+  enabled: false
+  # Drop the chart's default SYS_PTRACE capability (see nico-api).
+  containerSecurityContext: null
+nico-hardware-health:
+  enabled: true
+  # Drop the chart's default SYS_PTRACE capability (see nico-api).
+  containerSecurityContext: null
+nico-pxe:
+  enabled: true
+  # Drop the chart's default SYS_PTRACE capability (see nico-api).
+  containerSecurityContext: null
+  # Same as nico-api.legacyAlias above — forge-system namespace we don't own.
+  legacyAlias:
+    enabled: false
+  # x86_64 boot artifacts (scout kernel, initrd, squashfs). Replace with
+  # your own image if targeting a different architecture or artifact set.
+  bootArtifactContainers:
+    - name: boot-artifacts-x86-64
+      image: quay.io/alosadag/boot-artifacts-x86_64:latest-amd64
+      command: ["sh", "-c", "cp -r /x86_64 /forge-boot-artifacts/blobs/internal"]
+    # - name: boot-artifacts-aarch64
+    #   image: <registry>/boot-artifacts-aarch64:latest
+    #   command: ["sh", "-c", "cp -r /aarch64 /apt /firmware /boot-artifacts/blobs/internal"]
+nico-ssh-console-rs:
+  enabled: true
+  # Drop the chart's default IPC_LOCK capability (see nico-api).
+  containerSecurityContext: null
+  # Chart hardcodes port 22 in its static config.toml — same ambient-
+  # capability issue as nico-dns above. Content below is that file
+  # verbatim except for listen_address; defaults already match this
+  # deployment's namespace/service names so no substitution is lost.
+  service:
+    port: 2222
+  readinessProbe:
+    tcpSocket:
+      port: 2222
+    initialDelaySeconds: 1
+    periodSeconds: 30
+    failureThreshold: 3
+  configFiles:
+    config: |
+      listen_address = "[::]:2222"
+      metrics_address = "[::]:9009"
+      nico_url = "https://nico-api.nico-system.svc.cluster.local:1079"
+      carbide_url = "https://nico-api.nico-system.svc.cluster.local:1079"
+      nico_root_ca_path = "/var/run/secrets/spiffe.io/ca.crt"
+      forge_root_ca_path = "/var/run/secrets/spiffe.io/ca.crt"
+      client_cert_path = "/var/run/secrets/spiffe.io/tls.crt"
+      client_key_path = "/var/run/secrets/spiffe.io/tls.key"
+      host_key = "/etc/ssh/ssh_host_ed25519_key"
+      dpus = true
+      insecure = false
+      openssh_certificate_ca_fingerprints = []
+      admin_certificate_role = ""
+      insecure_ipmi_ciphers = false
+      force_deactivate_conflicting_ipmi_sol_sessions = false
+      api_poll_interval = "180s"
+      console_logging_enabled = true
+      console_logs_path = "/var/log/consoles"
+# dockurr/chrony's entrypoint chowns /run/chrony, which fails under
+# OpenShift's arbitrary non-root UID. Not in our documented topology or
+# required by machine-a-tron testing.
+nico-ntp:
+  enabled: false
+unbound:
+  enabled: true
+  image:
+    repository: registry.redhat.io/hi/unbound
+    tag: "1.26.1"
+  exporter:
+    enabled: false
+  # Bind unprivileged port 5353 (no CAP_NET_BIND_SERVICE needed under
+  # restricted-v2 SCC). The chart (fix/openshift-compatibility) now renders
+  # containerPort from this value so probes and Deployment ports match.
+  containerPort: 5353
+  # The Red Hat UBI image has no shell (/bin/sh) — it's a minimal image with
+  # only the unbound binary at /usr/sbin/unbound. The main config is injected
+  # via kustomize patch (fix-unbound-config.yaml) because the chart's
+  # configmap.yaml template only renders hardcoded keys from localConfig.
+  command: ["/usr/sbin/unbound"]
+  args: ["-d", "-c", "/etc/unbound/local.conf.d/unbound.cfg"]
+  # externalService:
+  #   enabled: true
+  #   annotations:
+  #     metallb.universe.tf/loadBalancerIPs: "<UNBOUND_LB_IP>"
+  # localConfig:
+  #   forwarders.conf: |
+  #     forward-zone:
+  #         name: .
+  #         forward-addr: <UPSTREAM_DNS_IP>
+  # localData:
+  #   - name: carbide-pxe.forge
+  #     addresses: ["<NICO_PXE_LB_IP>"]
+  #   - name: nico-pxe.forge
+  #     addresses: ["<NICO_PXE_LB_IP>"]
+  #   - name: carbide-static-pxe.forge
+  #     addresses: ["<NICO_PXE_LB_IP>"]
+  #   - name: carbide-api.forge
+  #     addresses: ["<NICO_API_LB_IP>"]
+
+nico-flow:
+  enabled: true
+  createNamespace: false
+  flowEnv: production
+  images:
+    flow:
+      repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-flow
+      tag: latest
+  database:
+    host: nico-site-pg-primary
+    port: 5432
+    usernameKey: user
+    certPath: ""
+    flow:
+      name: flow
+      credentialsSecret: nico-site-pg-pguser-nico
+  nicoCoreApi:
+    url: nico-api:1079
+  temporal:
+    host: temporal-frontend.nico-rest
+    port: 7233
+    namespace: flow
+    enableTls: true
+    serverName: interservice.server.temporal.local
+    certPath: /var/run/secrets/temporal-client-certs
+  temporalCert:
+    enabled: true
+    issuerRef:
+      kind: ClusterIssuer
+      name: nico-rest-ca-issuer
+      group: cert-manager.io
+  vault:
+    address: https://vault.nico-system:8200
+  certificate:
+    apiIdentity:
+      namespace: nico-system
+      serviceName: nico-flow
+  imagePullSecret:
+    create: false

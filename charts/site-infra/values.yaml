@@ -1,0 +1,301 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# Vault — BMC credential storage for Core tier
+#
+# Production: HA Raft (3 replicas) with TLS.
+# CRC/dev: standalone mode via Makefile CRC_VAULT_OVERRIDES.
+#
+# Unseal: `make vault-init` initializes and unseals Vault (one-time step).
+# The unseal key is stored in a K8s Secret. The postStart hook reads it
+# and auto-unseals on every pod restart.
+#
+# RECOMMENDATION — Production auto-unseal:
+#
+# The postStart + K8s Secret approach is suitable for development and
+# initial deployment. For production, replace it with an external unseal
+# mechanism that does not store the unseal key on the same cluster:
+#
+#   1. Cloud KMS (recommended for NCP cloud):
+#      Add a seal "awskms" / "gcpckms" / "azurekeyvault" stanza to the
+#      Vault config. Vault auto-unseals using the cloud provider's key
+#      management service. No unseal key stored anywhere.
+#      See: https://developer.hashicorp.com/vault/docs/configuration/seal
+#
+#   2. Transit Vault (recommended for multi-cluster / on-prem):
+#      Run a Transit Vault OUTSIDE this cluster (e.g., in NICo Cloud or
+#      operated by the security team). Add a seal "transit" stanza pointing
+#      to the external Transit Vault. Site Vaults auto-unseal via the
+#      Transit Vault's encryption key. The Transit Vault itself uses
+#      cloud KMS or is manually unsealed by the security team.
+#      See: https://developer.hashicorp.com/vault/tutorials/auto-unseal/autounseal-transit
+#
+# Both options eliminate the unseal key from the cluster entirely.
+# The postStart hook and vault-unseal-secret can be removed once an
+# external seal is configured — Vault handles unsealing natively.
+# =============================================================================
+vault:
+  fullnameOverride: vault
+  global:
+    openshift: true
+    tlsDisable: false
+  injector:
+    enabled: false
+  csi:
+    enabled: false
+  ui:
+    enabled: false
+  server:
+    image:
+      repository: docker.io/hashicorp/vault
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+    readinessProbe:
+      enabled: true
+      path: "/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204"
+    livenessProbe:
+      enabled: true
+      path: "/v1/sys/health?sealedcode=204&uninitcode=204&standbyok=true"
+      initialDelaySeconds: 60
+    extraEnvironmentVars:
+      VAULT_CACERT: /vault/userconfig/vault-tls/ca.crt
+    volumes:
+      - name: vault-tls
+        secret:
+          secretName: vault-tls
+      - name: vault-raft-tls
+        secret:
+          secretName: vault-raft-tls
+      - name: vault-unseal
+        secret:
+          secretName: vault-unseal-secret
+          optional: true
+    volumeMounts:
+      - mountPath: /vault/userconfig/vault-tls
+        name: vault-tls
+      - mountPath: /vault/userconfig/vault-raft-tls
+        name: vault-raft-tls
+      - mountPath: /vault/userconfig/unseal
+        name: vault-unseal
+        readOnly: true
+    postStart:
+      - /bin/sh
+      - -c
+      - |
+        sleep 5
+        if [ -f /vault/userconfig/unseal/unseal-key ]; then
+          export VAULT_ADDR=https://127.0.0.1:8200
+          export VAULT_SKIP_VERIFY=true
+          until vault status -format=json 2>/dev/null | grep -q '"initialized"'; do
+            sleep 2
+          done
+          if vault status -format=json 2>/dev/null | grep -q '"sealed".*true'; then
+            vault operator unseal "$(cat /vault/userconfig/unseal/unseal-key)" 2>/dev/null || true
+          fi
+        fi
+    shareProcessNamespace: true
+    extraContainers:
+      - name: vault-cert-reload
+        image: registry.access.redhat.com/ubi10/ubi-minimal:latest
+        command:
+          - /bin/sh
+          - -c
+          - |
+            microdnf install -y procps-ng && microdnf clean all
+            last_mod=0
+            while true; do
+              cur_mod=$(stat -c %Y /vault/userconfig/vault-tls/tls.crt 2>/dev/null || echo 0)
+              if [ "$cur_mod" -gt "$last_mod" ] && [ "$last_mod" -gt 0 ]; then
+                pkill -HUP vault && echo "SIGHUP sent — Vault reloading TLS certs"
+                last_mod=$cur_mod
+              elif [ "$last_mod" -eq 0 ]; then
+                last_mod=$cur_mod
+              fi
+              sleep 300
+            done
+        volumeMounts:
+          - mountPath: /vault/userconfig/vault-tls
+            name: vault-tls
+            readOnly: true
+    service:
+      publishNotReadyAddresses: false
+    dataStorage:
+      enabled: true
+      storageClass: null
+      size: 5Gi
+    auditStorage:
+      enabled: true
+      storageClass: null
+      size: 1Gi
+    persistentVolumeClaimRetentionPolicy:
+      whenDeleted: Retain
+      whenScaled: Retain
+    standalone:
+      enabled: false
+    ha:
+      enabled: true
+      replicas: 3
+      raft:
+        enabled: true
+        setNodeId: true
+        config: |
+          listener "tcp" {
+            address         = "[::]:8200"
+            cluster_address = "[::]:8201"
+            tls_cert_file      = "/vault/userconfig/vault-tls/tls.crt"
+            tls_key_file       = "/vault/userconfig/vault-tls/tls.key"
+            tls_client_ca_file = "/vault/userconfig/vault-tls/ca.crt"
+            telemetry {
+              unauthenticated_metrics_access = true
+            }
+          }
+
+          storage "raft" {
+            path = "/vault/data"
+            retry_join {
+              leader_tls_servername   = "vault-0.vault-internal"
+              leader_api_addr         = "https://vault-0.vault-internal:8200"
+              leader_ca_cert_file     = "/vault/userconfig/vault-raft-tls/ca.crt"
+              leader_client_cert_file = "/vault/userconfig/vault-raft-tls/tls.crt"
+              leader_client_key_file  = "/vault/userconfig/vault-raft-tls/tls.key"
+            }
+            retry_join {
+              leader_tls_servername   = "vault-1.vault-internal"
+              leader_api_addr         = "https://vault-1.vault-internal:8200"
+              leader_ca_cert_file     = "/vault/userconfig/vault-raft-tls/ca.crt"
+              leader_client_cert_file = "/vault/userconfig/vault-raft-tls/tls.crt"
+              leader_client_key_file  = "/vault/userconfig/vault-raft-tls/tls.key"
+            }
+            retry_join {
+              leader_tls_servername   = "vault-2.vault-internal"
+              leader_api_addr         = "https://vault-2.vault-internal:8200"
+              leader_ca_cert_file     = "/vault/userconfig/vault-raft-tls/ca.crt"
+              leader_client_cert_file = "/vault/userconfig/vault-raft-tls/tls.crt"
+              leader_client_key_file  = "/vault/userconfig/vault-raft-tls/tls.key"
+            }
+            autopilot {
+              cleanup_dead_servers          = "true"
+              last_contact_threshold        = "200ms"
+              last_contact_failure_threshold = "10m"
+              max_trailing_logs             = 250000
+              min_quorum                    = 3
+              server_stabilization_time     = "10s"
+            }
+          }
+
+          telemetry {
+            prometheus_retention_time = "30s"
+            disable_hostname          = true
+          }
+
+          service_registration "kubernetes" {}
+
+# Vault configuration (PKI, AppRole, KV seeding) is handled by `make vault-init`
+
+# =============================================================================
+# NATS — MQTT event bus for DSX Exchange (BMS telemetry, leak detection)
+# =============================================================================
+nats:
+  fullnameOverride: nats
+  natsBox:
+    enabled: false
+  config:
+    cluster:
+      enabled: false
+    jetstream:
+      enabled: true
+      fileStore:
+        pvc:
+          size: 1Gi
+    mqtt:
+      enabled: true
+      port: 1883
+
+# =============================================================================
+# NICo Flow — controls whether Flow databases and Vault tokens are provisioned
+# =============================================================================
+flow:
+  enabled: true
+
+# =============================================================================
+# MetalLB — address pools, advertisements and BGP peers for the site-facing
+# Core service VIPs. The operator + singleton MetalLB instance are installed by
+# the prereqs chart (nvidia-infra-controller-prereqs, values.metallb); this
+# block is the site NETWORK config and is applied after the operator is ready.
+#
+# The VIPs themselves are pinned per-Service via the
+# `metallb.universe.tf/loadBalancerIPs` annotation in
+# helm/values/nico-core-site.yaml (externalService.annotations); every pinned
+# VIP MUST fall inside one of the addressPools ranges below.
+#
+# addresses use RFC 5737 TEST-NET-1 (192.0.2.0/24) as documentation-safe
+# PLACEHOLDERS — replace with the real site's VIP range before onboarding.
+#
+# mode:
+#   bgp — advertise each VIP /32 to the ToR/fabric over BGP (production
+#         reference: MetalLB speaks to the FRR ToR; the node's default gateway
+#         must BE that fabric so OVN returns service traffic symmetrically —
+#         see CLAUDE.md "Networking / MetalLB").
+#   l2  — gratuitous-ARP a VIP from one node (single-subnet / lab fallback).
+# =============================================================================
+metallb:
+  enabled: true
+  namespace: metallb-system
+  mode: bgp
+  addressPools:
+    - name: nico-site-vips
+      addresses:
+        - 192.0.2.0/24
+      autoAssign: false
+  # Used when mode=l2. Empty interfaces => advertise on all.
+  l2:
+    interfaces: []
+  # Used when mode=bgp. Peer with the ToR/leaf fabric. ASNs/addresses are
+  # PLACEHOLDERS — set to the real site's fabric values.
+  bgp:
+    localASN: 64513
+    peers:
+      - name: tor
+        peerASN: 64512
+        peerAddress: 192.168.130.5
+        peerPort: 179
+    advertisement:
+      # /32 so each VIP is advertised as a host route.
+      aggregationLength: 32
+      communities: []
+      localPref: 0
+
+# =============================================================================
+# Crunchy PostgreSQL cluster for NICo site
+# =============================================================================
+postgresql:
+  enabled: true
+  instances: 1
+  storage:
+    size: 20Gi
+  backupStorage:
+    size: 6Gi
+
+# =============================================================================
+# nico-rest-common — shared secrets for site profile
+# =============================================================================
+nico-rest-common:
+  secrets:
+    create: true
+    temporalEncryptionKey:
+      value: ""
+
+# Static IP on the dataplane NIC (NodeNetworkConfigurationPolicy via
+# kubernetes-nmstate) so MetalLB can ARP the VIP on that VLAN. Neutral by
+# default — set interface/address per-site via SITE_INFRA_VALUES.
+nodeNetwork:
+  enabled: false
+  interface: ""
+  address: ""
+  prefixLength: 24

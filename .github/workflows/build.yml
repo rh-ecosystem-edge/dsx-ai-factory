@@ -87,6 +87,7 @@ jobs:
             context: components/infra-controller/rest-api/
           - name: unbound
             dockerfile: docker/infra-controller/Dockerfile.unbound
+            context: docker/infra-controller/
           - name: infra-controller-ntp
             dockerfile: docker/infra-controller/Dockerfile.infra-controller-ntp
             context: docker/infra-controller/

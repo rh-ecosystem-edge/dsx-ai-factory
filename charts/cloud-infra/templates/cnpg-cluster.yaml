@@ -1,0 +1,157 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+
+Consolidated PostgreSQL cluster for the cloud profile.
+All cloud databases (nico, temporal, temporal_visibility, keycloak)
+run on a single Crunchy PostgresCluster, matching upstream's pattern.
+*/}}
+{{- if .Values.postgresql.enabled }}
+apiVersion: postgres-operator.crunchydata.com/v1beta1
+kind: PostgresCluster
+metadata:
+  name: nico-cloud-pg
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvidia-infra-controller-cloud-infra.labels" . | nindent 4 }}
+  annotations:
+spec:
+  postgresVersion: 18
+  customTLSSecret:
+    name: nico-cloud-pg-server-tls
+  customReplicationTLSSecret:
+    name: nico-cloud-pg-replication-tls
+  instances:
+    - name: instance1
+      replicas: {{ .Values.postgresql.instances | default 1 }}
+      dataVolumeClaimSpec:
+        accessModes:
+          - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: {{ .Values.postgresql.storage.size | default "20Gi" }}
+      walVolumeClaimSpec:
+        accessModes:
+          - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: {{ .Values.postgresql.walStorage.size | default "10Gi" }}
+  users:
+    - name: nico
+      databases:
+        - nico
+      options: "SUPERUSER"
+      password:
+        type: AlphaNumeric
+    - name: temporal
+      databases:
+        - temporal
+        - temporal_visibility
+      options: "SUPERUSER"
+      password:
+        type: AlphaNumeric
+    - name: keycloak
+      databases:
+        - keycloak
+      options: "SUPERUSER"
+      password:
+        type: AlphaNumeric
+  databaseInitSQL:
+    key: init.sql
+    name: nico-cloud-db-init
+  backups:
+    pgbackrest:
+      global:
+        repo1-retention-full: "{{ .Values.postgresql.backup.retentionFull | default 2 }}"
+        repo1-retention-full-type: count
+      repos:
+        - name: repo1
+          schedules:
+            full: "{{ .Values.postgresql.backup.scheduleFull | default "0 3 * * 0" }}"
+          volume:
+            volumeClaimSpec:
+              accessModes:
+                - "ReadWriteOnce"
+              resources:
+                requests:
+                  storage: {{ .Values.postgresql.backupStorage.size | default "20Gi" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nico-cloud-db-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvidia-infra-controller-cloud-infra.labels" . | nindent 4 }}
+  annotations:
+data:
+  init.sql: |
+    \c nico
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+    CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+    CREATE EXTENSION IF NOT EXISTS "btree_gin";
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: nico-cloud-pg-server-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvidia-infra-controller-cloud-infra.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-11"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  secretName: nico-cloud-pg-server-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - server auth
+    - client auth
+  dnsNames:
+    - nico-cloud-pg-primary
+    - nico-cloud-pg-primary.{{ .Release.Namespace }}
+    - nico-cloud-pg-primary.{{ .Release.Namespace }}.svc
+    - nico-cloud-pg-primary.{{ .Release.Namespace }}.svc.cluster.local
+    - nico-cloud-pg-replicas
+    - nico-cloud-pg-replicas.{{ .Release.Namespace }}
+    - nico-cloud-pg-replicas.{{ .Release.Namespace }}.svc
+    - nico-cloud-pg-replicas.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    name: nico-rest-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: nico-cloud-pg-replication-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvidia-infra-controller-cloud-infra.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-11"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  secretName: nico-cloud-pg-replication-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - client auth
+  commonName: _crunchyrepl
+  dnsNames:
+    - nico-cloud-pg-primary
+    - nico-cloud-pg-primary.{{ .Release.Namespace }}.svc
+  issuerRef:
+    name: nico-rest-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+{{- end }}

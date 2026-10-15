@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc.
+# SPDX-License-Identifier: Apache-2.0
+global:
+  image:
+    tag: latest
+    pullPolicy: IfNotPresent
+
+apiServer:
+  image:
+    repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory/nv-rms
+    tag: latest

@@ -1,0 +1,99 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+
+Wrapper secret for the upstream nico-api migration Job.
+The upstream template hardcodes secretKeyRef.key: username, but Crunchy PGO
+emits key: user. Kustomize post-renderer cannot reach Helm hook resources, so
+we create a wrapper secret that re-emits the Crunchy secret with both keys.
+The databaseCredentials.secretName value in nico-core.yaml points here.
+*/}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: eso-nico-system-reader
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvidia-infra-controller-site-infra.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: eso-pg-secret-reader
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvidia-infra-controller-site-infra.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+    resourceNames: ["nico-site-pg-pguser-nico"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: eso-pg-secret-reader
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvidia-infra-controller-site-infra.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: eso-pg-secret-reader
+subjects:
+  - kind: ServiceAccount
+    name: eso-nico-system-reader
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: nico-system-secretstore
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvidia-infra-controller-site-infra.labels" . | nindent 4 }}
+spec:
+  provider:
+    kubernetes:
+      remoteNamespace: {{ .Release.Namespace }}
+      server:
+        caProvider:
+          type: ConfigMap
+          name: kube-root-ca.crt
+          key: ca.crt
+      auth:
+        serviceAccount:
+          name: eso-nico-system-reader
+          namespace: {{ .Release.Namespace }}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: nico-site-pg-migration-creds-eso
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvidia-infra-controller-site-infra.labels" . | nindent 4 }}
+spec:
+  refreshInterval: 30s
+  secretStoreRef:
+    name: nico-system-secretstore
+    kind: SecretStore
+  target:
+    name: nico-site-pg-migration-creds
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      data:
+        user: "{{ "{{ .user }}" }}"
+        username: "{{ "{{ .user }}" }}"
+        password: "{{ "{{ .password }}" }}"
+  data:
+    - secretKey: user
+      remoteRef:
+        key: nico-site-pg-pguser-nico
+        property: user
+    - secretKey: password
+      remoteRef:
+        key: nico-site-pg-pguser-nico
+        property: password

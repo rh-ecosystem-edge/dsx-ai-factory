@@ -249,10 +249,8 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ---------------------------------------------------------------------------
-  # Publish component Helm charts as OCI artifacts
-  # These are the upstream charts (nico, nico-rest, rack-manager) published
-  # verbatim so the dsx-ai-factory umbrella can reference them via OCI rather
-  # than file:// paths.
+  # Publish upstream component charts as OCI artifacts
+  # (nico, nico-rest, rack-manager — referenced by nic-core deployment)
   # ---------------------------------------------------------------------------
   publish-component-charts:
     runs-on: ubuntu-latest
@@ -290,7 +288,8 @@ jobs:
           push_chart components/nv-rms/helm
 
   # ---------------------------------------------------------------------------
-  # Publish dsx-ai-factory umbrella chart (image tags pinned in values.yaml)
+  # Publish our Helm charts (cloud-infra, site-infra, prereqs)
+  # These use helm dependency build (local subcharts), not OCI pull.
   # ---------------------------------------------------------------------------
   publish-charts:
     needs:
@@ -319,31 +318,34 @@ jobs:
                 --username ${{ github.actor }} \
                 --password-stdin
 
-      - name: Pin image tags in chart values
+      - name: Pin image tags in value overlay files
         env:
           NICO_VERSION: ${{ needs.versions.outputs.infra_controller }}
           RMS_VERSION: ${{ needs.versions.outputs.nv_rms }}
-          NVSENTINEL_VERSION: ${{ needs.versions.outputs.nvsentinel }}
-          FIA_VERSION: ${{ needs.versions.outputs.fia }}
         run: |
-          # Update image tags in each chart's values.yaml before packaging
-          for chart in charts/*/; do
-            [ -f "$chart/values.yaml" ] || continue
+          # Pin image tags in charts/values/ overlay files before packaging
+          for f in charts/values/*.yaml; do
             sed -i \
               -e "s|infra-controller-core:.*|infra-controller-core:${NICO_VERSION}|g" \
-              -e "s|nv-rms:.*|nv-rms:${RMS_VERSION}|g" \
-              -e "s|nvsentinel:.*|nvsentinel:${NVSENTINEL_VERSION}|g" \
-              -e "s|fleet-intelligence-agent:.*|fleet-intelligence-agent:${FIA_VERSION}|g" \
-              "$chart/values.yaml"
+              -e "s|infra-controller-rest-api:.*|infra-controller-rest-api:${NICO_VERSION}|g" \
+              -e "s|infra-controller-rest-cert-manager:.*|infra-controller-rest-cert-manager:${NICO_VERSION}|g" \
+              -e "s|infra-controller-rest-db:.*|infra-controller-rest-db:${NICO_VERSION}|g" \
+              -e "s|infra-controller-rest-site-agent:.*|infra-controller-rest-site-agent:${NICO_VERSION}|g" \
+              -e "s|infra-controller-rest-site-manager:.*|infra-controller-rest-site-manager:${NICO_VERSION}|g" \
+              -e "s|infra-controller-rest-workflow:.*|infra-controller-rest-workflow:${NICO_VERSION}|g" \
+              -e "s|infra-controller-flow:.*|infra-controller-flow:${NICO_VERSION}|g" \
+              -e "s|infra-controller-ntp:.*|infra-controller-ntp:${NICO_VERSION}|g" \
+              -e "s|unbound:.*|unbound:${NICO_VERSION}|g" \
+              -e "/repository:.*nv-rms/{n;s|tag:.*|tag: ${RMS_VERSION}|}" \
+              "$f"
           done
 
-      - name: Package and push umbrella chart
+      - name: Package and push charts
         run: |
           mkdir -p /tmp/charts
-          for chart in charts/*/; do
+          for chart in charts/cloud-infra charts/site-infra charts/prereqs; do
             [ -f "$chart/Chart.yaml" ] || continue
-            # Pull component charts from OCI (published by publish-component-charts)
-            helm dependency update "$chart"
+            helm dependency build "$chart" 2>/dev/null || true
             pkg=$(helm package "$chart" --destination /tmp/charts/ | awk '{print $NF}')
             helm push "$pkg" "$CHART_REGISTRY"
           done

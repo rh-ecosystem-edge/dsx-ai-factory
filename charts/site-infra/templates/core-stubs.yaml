@@ -1,0 +1,43 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+
+Placeholder secrets for Core tier. `make vault-init` patches
+nico-vault-approle-tokens with real AppRole credentials.
+*/}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace "nico-vault-approle-tokens" }}
+{{- if not $existing }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nico-vault-approle-tokens
+  annotations:
+    helm.sh/resource-policy: keep
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvidia-infra-controller-site-infra.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  VAULT_ROLE_ID: ""
+  VAULT_SECRET_ID: ""
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: casbin-policy-override
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvidia-infra-controller-site-infra.labels" . | nindent 4 }}
+data:
+  casbin-policy.csv: |
+    g, spiffe-service-id/carbide-dhcp, carbide-dhcp
+    g, spiffe-service-id/carbide-dns, carbide-dns
+    g, spiffe-service-id/nico-dhcp, carbide-dhcp
+    g, spiffe-service-id/nico-dns, carbide-dns
+    g, spiffe-machine-id, machine
+    p, carbide-dhcp, forge/DiscoverDhcp
+    p, carbide-dns, forge/LookupRecord
+    p, trusted-certificate, forge/*
+    p, anonymous, forge/Version

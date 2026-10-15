@@ -1,0 +1,83 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# Values override for upstream nico-rest-site-agent chart
+# Deployed in the nico-system namespace.
+#
+# nico-rest-site-agent is a STANDALONE (type: application) chart — its values
+# live at the TOP LEVEL (.Values.envConfig, .Values.certificate, ...), NOT
+# nested under a `nico-rest-site-agent:` key. Nesting them silently falls back
+# to chart defaults (empty CORE_GRPC_ADDRESS, ServerTLS-only, wrong SPIFFE URI).
+# =============================================================================
+
+global:
+  image:
+    repository: ghcr.io/rh-ecosystem-edge
+    tag: latest
+    pullPolicy: IfNotPresent
+  # The Core gRPC client cert is issued by vault-nico-issuer (Vault PKI, the
+  # same CA nico-api's server cert uses) so (a) nico-api trusts the site-agent's
+  # client cert for mTLS, and (b) the ca.crt in the issued secret is the Vault
+  # PKI CA the site-agent uses as ServerCAPath to verify nico-api's server cert.
+  certificate:
+    issuerRef:
+      kind: ClusterIssuer
+      name: vault-nico-issuer
+      group: cert-manager.io
+
+replicaCount: 1
+
+certificate:
+  enabled: true
+  # Service identifier must resolve to "elektra-site-agent" for nico-api's
+  # SiteAgent RBAC role (InternalRBACRules, compiled-in static table in
+  # crates/api-core/src/auth/internal_rbac_rules.rs). nico-api strips the
+  # /nico-system/sa/ base path, yielding identifier "elektra-site-agent".
+  uris:
+    - "spiffe://nico.local/nico-system/sa/elektra-site-agent"
+
+bootstrap:
+  # Enabled via --set bootstrap.enabled=true by `make deploy-site-agent`; the
+  # bootstrap Job is idempotent (skips when the site-registration secret exists).
+  enabled: false
+  siteManager:
+    address: nico-rest-site-manager.nico-rest
+    tlsSecret: site-manager-tls
+
+envConfig:
+  ESA_PORT: "8080"
+  METRICS_PORT: "2112"
+  DEV_MODE: "false"
+  ENABLE_DEBUG: "false"
+  ENABLE_TLS: "true"
+
+  # mTLS to nico-api's Core gRPC on port 1079. SEC_OPT=2 (MutualTLS) is
+  # required: nico-api is TLS-only and requires a client cert. SEC_OPT=0/1
+  # leaves the NicoClient nil after a DeadlineExceeded on the initial Version
+  # health-check RPC, panicking on every inventory activity. The site-agent
+  # reads CORE_GRPC_* first, then legacy CARBIDE_* fallbacks.
+  CORE_GRPC_ADDRESS: "nico-api.nico-system.svc.cluster.local:1079"
+  CORE_GRPC_SEC_OPT: "2"
+  CORE_GRPC_CA_CERT_PATH: "/etc/core-grpc/ca.crt"
+  CORE_GRPC_CLIENT_CERT_PATH: "/etc/core-grpc/tls.crt"
+  CORE_GRPC_CLIENT_KEY_PATH: "/etc/core-grpc/tls.key"
+
+  # This site profile has no nico-flow (rack power/firmware) deployment —
+  # the default flow.flow.svc.cluster.local target doesn't exist here.
+  # Leaving Flow gRPC enabled hits an upstream bug where a failed first
+  # connection attempt panics on retry (duplicate Prometheus collector
+  # registration in flowgrpc.makeGrpcClientMetrics), crash-looping the pod.
+  FLOW_GRPC_ENABLED: "false"
+
+  CLUSTER_ID: ""
+  TEMPORAL_HOST: "temporal-frontend.nico-rest"
+  TEMPORAL_PORT: "7233"
+  TEMPORAL_SERVER: "interservice.server.temporal.local"
+  TEMPORAL_PUBLISH_NAMESPACE: "site"
+  TEMPORAL_PUBLISH_QUEUE: "site"
+  TEMPORAL_SUBSCRIBE_NAMESPACE: "site"
+  TEMPORAL_SUBSCRIBE_QUEUE: "site"
+  TEMPORAL_INVENTORY_SCHEDULE: "@every 3m"
+  TEMPORAL_CERT_PATH: "/etc/temporal-certs"
+  TEMPORAL_CERT: "temporal-client-site-agent-certs"
