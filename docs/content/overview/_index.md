@@ -99,9 +99,9 @@ provisioning protocol.
 | `nico-rest-cert-manager` | REST | Issues and rotates mTLS credentials for site components |
 | `nico-rest-db` | REST | Database migration runner for the REST-plane PostgreSQL schema |
 
-## Scout discovery OS
+## RHEL 10 Scout discovery image
 
-The Scout discovery OS is served by `nico-pxe` and is the first thing that
+The Scout discovery image is served by `nico-pxe` and is the first thing that
 boots on an AI Factory node. It consists of three blobs:
 
 | Boot blob | Role |
@@ -114,6 +114,9 @@ boots on an AI Factory node. It consists of three blobs:
 memory, storage) and reports it to `nico-api` via mTLS gRPC. This callback
 triggers BOM validation and advances the node through the provisioning state
 machine.
+
+The Scout UKI and rootfs are both based on Red Hat Enterprise Linux 10 and `forge-scout` is built
+with Red Hat's Rust toolchain.
 
 ## Provisioning flow
 
