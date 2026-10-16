@@ -78,6 +78,103 @@ See the [Deployment](../deployment/) section for step-by-step instructions.
 - [NICo managed host state machine](https://docs.nvidia.com/infra-controller/documentation/architecture/state-machines/managed-host)
 - [RMS architecture](https://docs.nvidia.com/rms/documentation/architecture/external-view)
 
+## Cloud and site planes
+
+NICo is split into two logical planes that can be deployed on the same cluster
+or on separate clusters:
+
+**Cloud plane** (`nico-rest` namespace) — stateless REST API, Temporal workflow
+orchestration, Keycloak authentication, and a cloud-plane PostgreSQL database.
+The cloud plane can be deployed once and serve multiple physical sites.
+
+**Site plane** (`nico-system` namespace) — the real-time provisioning engine:
+ISC Kea DHCP, iPXE server, DNS, the Core state machine (`nico-api`), Vault for
+credential management, and NATS for event delivery. The site plane runs at the
+physical location of the AI Factory hardware and must have L2 adjacency to the
+provisioning network.
+
+The two planes are bridged by the **REST site-agent** (`nico-rest-site-agent`),
+which runs in the `nico-system` namespace and relays workflow tasks from the
+cloud plane to the site plane over mTLS gRPC.
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    OpenShift cluster(s)                              │
+│                                                                      │
+│  ┌──────── nico-rest ──────────────┐  ┌────── nico-system ────────┐ │
+│  │  Temporal   Keycloak RHBK       │  │  nico-api (Core)          │ │
+│  │  Crunchy PG (cloud)             │  │  nico-dhcp  nico-pxe      │ │
+│  │  nico-rest-api                  │  │  nico-dns   Vault HA      │ │
+│  │  nico-rest-workflow             │◄─┤  NATS   Crunchy PG (site) │ │
+│  │  nico-rest-site-manager         │  │  RMS  site-agent          │ │
+│  └─────────────────────────────────┘  └───────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+                                │ provisioning network
+                    ┌───────────▼───────────────┐
+                    │     AI Factory Nodes        │
+                    └────────────────────────────┘
+```
+
+This is the same architecture regardless of where the planes are deployed.
+The `nico-rest` and `nico-system` namespaces can run on the **same cluster**
+(simpler, single-location deployments) or on **separate clusters** connected
+over a WAN link — a central cluster running the cloud plane serves multiple
+physical sites, each with its own site plane. The site-agent bridges them
+identically in both cases.
+
+The Makefile supports both: `make deploy-all-cloud` and `make deploy-all-site`
+on the same cluster for co-located deployments; `make deploy-all-cloud` on a
+central cluster and `make deploy-all-site SITE=<name>` on each site cluster
+for distributed deployments.
+
+## Host provisioning paths
+
+NICo supports three host provisioning paths. Only FLAT networking is supported
+in this release.
+
+| Path | Host NIC | Network topology | Status in this release |
+|---|---|---|---|
+| **FLAT** | Host motherboard | Shared provisioning VLAN (no relay needed) | **Supported** |
+| **Dedicated VLAN** | Host motherboard | Isolated provisioning VLAN, DHCP relay required | Alternative — see [Network prerequisites](../deployment/00-network-prerequisites/) |
+| **DPU** | BlueField DPU | Isolated per-tenant via DPU data plane | Not supported |
+
+### FLAT networking
+
+The provisioning NIC is on the host motherboard and shares a VLAN with the
+management cluster. `nico-dhcp` and `nico-pxe` are reachable without a DHCP
+relay because the management cluster is L2-adjacent to the AI Factory nodes.
+
+```
+Management Cluster          ToR Switch          AI Factory Node
+┌──────────────────┐        ┌─────────┐        ┌──────────────┐
+│  bond-ns.210     │        │  VLAN   │        │  NIC (host   │
+│  172.16.10.2/24  ├────────┤  210    ├────────┤  motherboard)│
+│                  │        │         │        │              │
+│  nico-dhcp VIP   │        │         │        │  BMC NIC     │
+│  172.16.10.100   │        │  OOB    ├────────┤  (OOB VLAN)  │
+└──────────────────┘        └─────────┘        └──────────────┘
+```
+
+### DPU-based provisioning (not supported in this release)
+
+AI Factory nodes are equipped with NVIDIA BlueField DPUs. NICo manages dual
+registration: the host BMC (Redfish via OOB) and the DPU BMC. The DPU acts as
+both a management controller and a data-plane NIC, enforcing zero-trust
+isolation between tenants at the network layer. Support for DPU-based
+provisioning is planned for a future release.
+
+```
+Management Cluster          ToR Switch          AI Factory Node
+┌──────────────────┐        ┌─────────┐        ┌──────────────┐
+│  nico-api        ├────────┤  OOB    ├────────┤  Host BMC    │
+│                  │        │  VLAN   │        │              │
+│                  │        │         │        │  BlueField   │
+│  nico-api        ├────────┤  DPU    ├────────┤  DPU BMC     │
+│  (DPU endpoint)  │        │  VLAN   │        │  DPU NIC     │
+└──────────────────┘        └─────────┘        └──────────────┘
+   registers both BMC                          dual registration
+```
+
 ## NICo service reference
 
 NICo is composed of several services that each own a specific part of the
@@ -99,9 +196,9 @@ provisioning protocol.
 | `nico-rest-cert-manager` | REST | Issues and rotates mTLS credentials for site components |
 | `nico-rest-db` | REST | Database migration runner for the REST-plane PostgreSQL schema |
 
-## Scout discovery OS
+## RHEL 10 Scout discovery image
 
-The Scout discovery OS is served by `nico-pxe` and is the first thing that
+The Scout discovery image is served by `nico-pxe` and is the first thing that
 boots on an AI Factory node. It consists of three blobs:
 
 | Boot blob | Role |
@@ -114,6 +211,9 @@ boots on an AI Factory node. It consists of three blobs:
 memory, storage) and reports it to `nico-api` via mTLS gRPC. This callback
 triggers BOM validation and advances the node through the provisioning state
 machine.
+
+The Scout UKI and rootfs are both based on Red Hat Enterprise Linux 10 and `forge-scout` is built
+with Red Hat's Rust toolchain.
 
 ## Provisioning flow
 
