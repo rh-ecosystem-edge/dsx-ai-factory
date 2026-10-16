@@ -19,13 +19,18 @@ the AI Factory infrastructure, and the **AI Factory nodes** that run AI workload
 
 ### Management cluster components
 
-**NVIDIA Infra Controller (NICo)** runs on the management cluster and manages
-the full lifecycle of bare-metal AI Factory nodes:
+**NVIDIA Infra Controller (NICo)** is an NVIDIA open-source suite of microservices for zero-trust lifecycle management of bare-metal servers. It automates hardware discovery, firmware validation, DPU provisioning, and per-tenant network isolation. It enables cloud providers and infrastructure operators to operate an AI Factory infrastructure.
+
+**NICo** handles everything from the initial Redfish discovery through hardware enumeration and validation (using ephemeral Scout agents), promoting nodes to a ready state, allocating them, and finally pushing the OS via PXE. NICo leverages BlueField DPUs — or even standard zero-DPU hosts — to create an isolation boundary between the infrastructure provider and the tenants that share the infrastructure, which lets us deploy RHEL and bare-metal OpenShift clusters securely and automatically.
+
+On the management cluster, **NICo** manages the full lifecycle of bare-metal
+AI Factory nodes:
 
 - **Discovery** — nodes boot into the Scout OS via PXE/iPXE and are discovered
   by NICo, which validates hardware inventory against the expected configuration
-- **ZTP** — NICo's DHCP service (ISC Kea) hands out addresses and boot options;
-  the Scout OS performs BIOS/firmware configuration before OS installation
+- **ZTP** — NICo's DHCP service (ISC Kea) hands out addresses and PXE/iPXE boot
+  options; `nico-api` applies BIOS settings over Redfish and the
+  `preingestion-manager` brings firmware to the required baseline before OS install
 - **Provisioning** — NICo installs RHEL or RHCOS on validated nodes using
   qcow-imager and pushes the workload cluster ignition
 - **Machine validation** — each node undergoes hardware attestation before
@@ -39,25 +44,36 @@ the full lifecycle of bare-metal AI Factory nodes:
 
 ### OLM operators (prerequisites)
 
-The following operators must be installed on the management cluster before
-deploying NICo and RMS:
-
 | Operator | Purpose |
 |---|---|
 | cert-manager | TLS certificate management for NICo mTLS |
 | Crunchy PostgreSQL | Database backend for NICo and RMS |
 | RHBK (Keycloak) | SSO / OIDC for NICo REST API and UI |
-| MetalLB | Load-balancer VIPs for NICo services |
 | External Secrets Operator | Integration with Vault or other secret stores |
+| MetalLB | Load-balancer VIPs for NICo provisioning services |
 | NMState | Host network configuration on management nodes |
+| ODF or LVM Storage (LVMS) | Default StorageClass for the NICo, Vault, and PostgreSQL PVCs |
+| MultiCluster Engine (MCE) | OpenShift provisioning (Assisted Installer / Agent) and HostedControlPlanes (HyperShift) |
+
+> cert-manager, Crunchy PostgreSQL, RHBK and External Secrets Operator are
+> required by NICo and RMS themselves. MetalLB and NMState provide the
+> provisioning network. Storage (ODF or LVMS) backs the PVCs. MultiCluster
+> Engine (MCE) is required for the OpenShift provisioning phase.
 
 ### Network planes
 
-| Network | Purpose | Users |
-|---|---|---|
-| Provisioning (L2) | PXE boot, DHCP, iPXE, qcow imaging | NICo ↔ AI Factory nodes |
-| Management (OOB) | Redfish BMC, switch NVUE API | NICo, RMS ↔ hardware |
-| Workload | AI compute traffic, GPUDirect RDMA | AI Factory nodes |
+NICo models host connectivity as a set of **network segments**. The table maps
+the operational planes to NICo's segment names:
+
+| Plane (operational) | NICo segment(s) | Purpose | On it |
+|---|---|---|---|
+| **Out-of-band / management** | `Underlay` | Redfish to host/DPU BMCs and switch NVUE; DHCP for BMCs and DPU OOB | NICo & RMS ↔ BMCs, switches, DPUs |
+| **Provisioning / host in-band** | `HostInband` (zero-DPU) · `Admin` (DPU overlay) | DHCP + PXE/iPXE boot and the host OS address during discovery and OS install | NICo ↔ AI Factory host OS |
+| **Tenant** | `Tenant` | North–south tenant traffic after allocation; NICo programs the VPC/VNI automatically | AI Factory nodes ↔ tenant network |
+
+> The GPU **compute fabrics** — Ethernet East–West (RoCE), InfiniBand, and
+> NVLink — are isolated per tenant by NICo via HBN, UFM, and NMX-C respectively.
+> They are not part of the DHCP-served segments above.
 
 ## Deployment sequence
 
@@ -91,10 +107,9 @@ provisioning protocol.
 | `nico-dns` / `unbound` | Site | DNS for the provisioning zone; resolves NICo service hostnames during boot |
 | `site-explorer` | Site | Background loop that probes BMC endpoints via Redfish and creates `explored_endpoint` records |
 | `preingestion-manager` | Site | Manages BMC reset, NTP configuration, and firmware upgrades before a node enters the provisioning flow |
-| `nico-site-agent` | REST | Relay between the cloud-plane REST workflow engine and the site-plane `nico-api`; carries network and storage configuration to the site |
 | `nico-rest-api` | REST | REST API server for operator-facing operations (machine registration, instance management) |
 | `nico-rest-site-manager` | REST | Manages site-level resources (segments, VPCs, subnets) via the REST API |
-| `nico-rest-site-agent` | REST | Receives workflow tasks from `nico-rest-site-manager` and executes them on the site plane |
+| `nico-rest-site-agent` | REST | Site-agent (codename *Elektra*) bridging the cloud REST plane to the site Core: receives Temporal workflow tasks, relays them to `nico-api` over mTLS gRPC, and carries network and storage configuration to the site |
 | `nico-rest-workflow` | REST | Temporal workflow worker; orchestrates multi-step provisioning operations (OS install, reprovisioning) |
 | `nico-rest-cert-manager` | REST | Issues and rotates mTLS credentials for site components |
 | `nico-rest-db` | REST | Database migration runner for the REST-plane PostgreSQL schema |
@@ -117,19 +132,32 @@ machine.
 
 ## Provisioning flow
 
+The diagram below traces the full arc end to end. It begins when a machine is registered — the operator tells NICo to expect a server with a given BMC. NICo's Site Explorer reaches that BMC over Redfish, fully out of band, and performs the initial hardware discovery.
+
+NICo then power-cycles the host and PXE-boots it into Scout, an ephemeral agent that enumerates the hardware, securely wipes the disks, reports the full inventory back, and runs machine validation tests. As Scout verifies the host identity, NICo promotes the temporary predicted ID into a stable host ID.
+
+Once validation passes, the node reaches `Ready`: clean, validated, and parked in the pool. This completes the NICo bare-metal lifecycle.
+
+The NICo cloud tier then handles provisioning. The operator defines capacity with an InstanceType, allocates it to a tenant, and attaches a flat VPC. Creating an Instance binds the tenant's network to the physical hardware and triggers an iPXE boot into the OpenShift or RHEL artifacts. For OpenShift, the Red Hat Assisted Installer takes over: NICo boots the discovery agent (an RHCOS live image), the node registers as an Agent, and a NodePool joins it to the HostedCluster as an operational worker node.
+
+The result is two clean layers: NICo delivers networked, validated bare metal, and OpenShift builds on top.
+
+![Provisioning sequence diagram](/images/provisioning-flow.png)
+
+
+## Provisioning Diagram
+
 ![Provisioning sequence diagram](/images/provisioning-rhel-sequence.svg)
 
-Steps 1–7 are identical for all operating systems. The divergence happens
-at step 8, where NICo boots the OS-specific installer:
+The flow is the same for every operating system up to OS install — the divergence is only at the final step, where NICo boots the OS-specific installer
 
-1. **BMC IP assignment** — node powers on; `nico-dhcp` assigns a BMC IP lease and calls `nico-api` to record the BMC MAC
-2. **Redfish discovery** — `site-explorer` probes the BMC IP via Redfish and records the hardware inventory snapshot
-3. **PXE boot entry** — host UEFI sends a DHCP DISCOVER; `nico-dhcp` returns an IP and an HTTP boot URL; host downloads `ipxe.efi` from `nico-pxe`
-4. **Scout boot** — `nico-pxe` serves the Scout iPXE script; host boots `scout.efi` → `scout.squashfs`; `forge-scout` enumerates hardware and calls back to `nico-api`
-5. **BIOS configuration** — `nico-api` pushes BIOS settings via Redfish (boot order, UEFI, secure boot)
-6. **BOM validation** — `nico-api` cross-checks the Scout inventory against the expected SKU; node boots Scout a second time for runtime measurements (GPU health, NIC links)
-7. **Node ready** — node enters the `Ready` pool, available for instance assignment
-8. **OS provisioning** — when an instance is assigned, `nico-rest-workflow` orchestrates network/storage config via `nico-site-agent`, then boots the OS installer:
+1. **Registration & approval** — the operator registers each host in the Expected Machines table (BMC MAC, chassis serial, factory BMC credentials) and approves it for Measured Boot. Only registered machines are ingested.
+2. **BMC discovery** — the host BMC obtains its IP (from `nico-dhcp`, or a fixed `bmc_ip_address` added in the Expected Machine table). In the diagram, the node powers on; in this case `nico-dhcp` assigns an IP to the BMC and forwards the MAC information to `nico-api` which matches it against the Expected Machines table and returns an address **only for a registered machine**. 
+3. **Redfish discovery** — `site-explorer` probes the BMC over Redfish with the factory credentials, collects the first hardware inventory snapshot, and **optionally** rotates the BMC password to the site-wide credential.
+4. **Preingestion** — before pairing, NICo runs a preingestion state machine against each discovered BMC endpoint (host and DPU): it checks the BMC clock is within the allowed drift of site time (resetting the BMC if not) and upgrades host firmware that is below the minimum version required for ingestion.
+5. **DPU & host init** — for hosts with a managed DPU, NICo sets Secure Boot and installs the DPU OS (BFB). `nico-api` then configures BIOS and boot order via Redfish and PXE-boots the host into **Scout** (served by `nico-pxe`), which enumerates the hardware and reports back.
+6. **Validation** — `nico-api` checks the reported inventory against the expected SKU; if hardware validation is enabled, Scout runs the validation tests (GPU, CPU, memory, storage). NICo finalises the stable host ID and applies UEFI lockdown.
+7. **Ready** — the host enters the available pool, ready for an instance to be assigned.
+8. **OS provisioning** — when an instance is assigned, `nico-rest-workflow` orchestrates network and storage config via `nico-rest-site-agent`, then boots the OS-specific installer:
    - **RHEL**: `qcow-imager.efi` writes a RHEL qcow2 image to disk
-   - **RHCOS**: `InlineIpxe` boots the RHCOS live installer via `coreos-installer`
-9. **OS ready** — node boots from disk; PXE override cleared
+   - **OpenShift**: NICo iPXE-boots the Red Hat Assisted Installer discovery agent; the node registers as an Agent and a NodePool joins it to the HostedCluster (see [Deploying OpenShift](../deployment/03-openshift/))
