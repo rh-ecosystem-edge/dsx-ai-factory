@@ -118,6 +118,11 @@ The following subscriptions are required:
 | `podman` | optional | Running the containerised CLI wrappers (`nico-admin-cli`, `nicocli`); not needed if you use the native CLI binaries |
 | GitHub account | — | Access to `ghcr.io/rh-ecosystem-edge/dsx-ai-factory` |
 
+Verify all required tools are installed. Some checks (cluster login, default StorageClass) require an active cluster session to your management cluster. 
+
+```bash
+make deploy-prereqs
+```
 ## Namespaces
 
 The deployment uses three namespaces on the management cluster:
