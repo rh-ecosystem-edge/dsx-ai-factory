@@ -13,8 +13,10 @@ hardware, software, and network requirements are met.
 
 A dedicated OpenShift cluster to host NICo and RMS. The cluster must have a
 dynamic RWO storage provisioner set as the default StorageClass — the
-PostgreSQL, Vault, NATS, and Temporal PVCs all require it. On bare-metal
-clusters, install **LVM Storage (LVMS)** before deploying:
+PostgreSQL, Vault, NATS, and MCE all require it. On the management cluster **OpenShift Data Foundation (ODF)** or
+ **LVM Storage (LVMS)** can be installed before deploying NICo. 
+ 
+ > ODF is recommended for production environments.
 
 ```bash
 # Mark the LVMS StorageClass as default after creating an LVMCluster
@@ -22,7 +24,6 @@ oc patch storageclass <lvms-class-name> \
   -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
 ```
 
-**OpenShift Data Foundation (ODF)** is also supported for multi-node HA storage.
 
 #### NICo component sizing
 
@@ -65,11 +66,15 @@ for the validated hardware bill of materials.
 
 ### Network
 
-| Network | Requirements |
-|---|---|
-| Provisioning | L2 segment reachable from management cluster; DHCP managed by NICo |
-| Management (OOB) | Reachable from management cluster; Redfish BMC on AI Factory nodes and switches |
-| Workload | RoCE/InfiniBand fabric for GPUDirect RDMA |
+| Plane | NICo segment | Requirements |
+|---|---|---|
+| Out-of-band / management | `Underlay` | Reachable from the management cluster; Redfish BMC on AI Factory nodes and switches; `nico-dhcp` serves the BMCs and DPU OOB |
+| Provisioning / host in-band | `HostInband` · `Admin` | Boot segment for the host OS during discovery and OS install. DHCP served by `nico-dhcp` on `HostInband` (zero-DPU), or by the DPU on the `Admin` overlay. A DHCP relay to the `nico-dhcp` VIP is required when the segment is L3-separated from the management cluster |
+| Tenant | `Tenant` | North–south tenant fabric; NICo programs the VPC/VNI automatically after allocation |
+
+> The GPU **compute fabrics** — Ethernet East–West (RoCE), InfiniBand, and
+> NVLink — must be pre-built. NICo isolates them per tenant via HBN, UFM, and
+> NMX-C, but does not configure the underlying switches.
 
 ## Software
 
@@ -78,11 +83,23 @@ for the validated hardware bill of materials.
 - **Management cluster:** OpenShift 4.22 or later
 - **Workload cluster:** OpenShift 4.22 or later (installed by NICo)
 
+### Cluster operators
+
+The management cluster requires the OLM operators listed under
+[Architecture → OLM operators](../overview/#olm-operators-prerequisites):
+cert-manager, Crunchy PostgreSQL, RHBK, External Secrets Operator, MetalLB and
+NMState for NICo and RMS; **ODF or LVM Storage (LVMS)** for the default
+StorageClass; and **MultiCluster Engine (MCE)** for OpenShift provisioning
+(Assisted Installer / Agent) and HostedControlPlanes.
+
+The DSX AI Factory `prereqs` chart installs the NICo/RMS operators. Install
+storage (ODF or LVMS) and MCE separately from OperatorHub beforehand.
+
 ### Red Hat subscriptions
 
 The following subscriptions are required:
 
-- Red Hat OpenShift Container Platform
+- Red Hat OpenShift Container Platform (management and workload clusters)
 - Red Hat Enterprise Linux (for AI Factory compute nodes)
 - Access to `registry.access.redhat.com` (UBI images for container builds)
 - RHSM organization ID and activation key for container image builds
@@ -93,6 +110,12 @@ The following subscriptions are required:
 |---|---|---|
 | `oc` / `kubectl` | ≥ 4.22 | Cluster management |
 | `helm` | **4.x** | Chart installation (Helm 4 required — the kustomize post-renderer plugin uses the Helm 4 post-renderer protocol; Helm 3 fails to load it) |
+| `make` | — | Drives the deployment workflow (Makefile targets) |
+| `kustomize` | — | Post-render patches applied during Helm install |
+| `python3` | 3.x | Helper scripts (preflight checks, route patching) |
+| `jq` | — | JSON processing in the deploy scripts |
+| `git`, `curl`, `ssh-keygen` | — | Repository access and credential/certificate helpers |
+| `podman` | optional | Running the containerised CLI wrappers (`nico-admin-cli`, `nicocli`); not needed if you use the native CLI binaries |
 | GitHub account | — | Access to `ghcr.io/rh-ecosystem-edge/dsx-ai-factory` |
 
 ## Namespaces
