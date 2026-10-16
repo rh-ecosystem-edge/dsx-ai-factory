@@ -61,10 +61,13 @@ deploying NICo and RMS:
 
 ## Deployment sequence
 
-1. **Prerequisites** — install OLM operators on the management cluster
-2. **Deploy DSX AI Factory** — install the `dsx-ai-factory` Helm chart
-3. **Deploy RHEL** — NICo provisions RHEL on AI Factory compute nodes
-4. **Deploy OpenShift** — install OpenShift on the provisioned nodes
+1. **[Network prerequisites](../deployment/00-network-prerequisites/)** — provision VLANs and MetalLB VIPs on the ToR switch and management cluster
+2. **[Prerequisites chart](../deployment/01-dsx-ai-factory/)** — install OLM operators (cert-manager, Crunchy PostgreSQL, RHBK, MetalLB, ESO, NMState)
+3. **[Cloud infrastructure](../deployment/02-cloud-infra/)** — deploy Temporal, Keycloak, and Crunchy PG cloud databases (`nico-rest` namespace)
+4. **[Vault and site infrastructure](../deployment/03-vault/)** — deploy Vault HA, NATS, and Crunchy PG site database; initialize Vault PKI and AppRole (`nico-system` namespace)
+5. **[NICo Core and site registration](../deployment/04-site-registration/)** — deploy NICo Core, register the site, deploy REST site-agent and RMS
+6. **[Deploy RHEL](../deployment/05-rhel/)** — NICo provisions RHEL on AI Factory bare-metal nodes
+7. **[Deploy OpenShift](../deployment/06-openshift/)** — install OpenShift worker nodes on provisioned hardware
 
 See the [Deployment](../deployment/) section for step-by-step instructions.
 

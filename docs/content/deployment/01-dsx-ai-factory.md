@@ -92,6 +92,7 @@ network:
 | `nico-pxe` | 8080 | TCP | iPXE server and boot artifact serving |
 | `unbound` | 53 | UDP+TCP | DNS for the `.forge` provisioning zone |
 | `nico-dhcp` | 67 | UDP | DHCP for AI Factory nodes |
+| `nico-ssh-console-rs` | 2222 | TCP | SSH console access to bare-metal nodes |
 
 All four services share a single VIP using MetalLB's `allow-shared-ip`
 annotation. Create an `IPAddressPool` and `L2Advertisement` in the

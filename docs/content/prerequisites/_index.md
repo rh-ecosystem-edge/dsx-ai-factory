@@ -92,8 +92,18 @@ The following subscriptions are required:
 | Tool | Version | Purpose |
 |---|---|---|
 | `oc` / `kubectl` | ≥ 4.22 | Cluster management |
-| `helm` | ≥ 3.15 | Chart installation |
+| `helm` | **4.x** | Chart installation (Helm 4 required — the kustomize post-renderer plugin uses the Helm 4 post-renderer protocol; Helm 3 fails to load it) |
 | GitHub account | — | Access to `ghcr.io/rh-ecosystem-edge/dsx-ai-factory` |
+
+## Namespaces
+
+The deployment uses three namespaces on the management cluster:
+
+| Namespace | Contents |
+|---|---|
+| `nico-rest` | REST API (`nico-rest-api`), Temporal, Crunchy PG (cloud), Keycloak routes, ESO secrets |
+| `nico-system` | NICo Core (`nico-api`), Vault HA, NATS, Crunchy PG (site), REST site-agent, RMS |
+| `rhbk-operator` | RHBK Keycloak operator and Keycloak instance |
 
 ## Access to container images
 
