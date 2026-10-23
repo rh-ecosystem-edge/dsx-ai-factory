@@ -5,11 +5,11 @@
 # Thin wrapper to run the nico-admin-cli container image over mTLS from a
 # workstation, so admins avoid long `podman run ...` lines and `oc exec`.
 #
-# Setup (one-time): drop the admin mTLS material into $NICO_ADMIN_CLI_CERTS
-# (default ~/.config/nico):
-#   nico-root-ca.crt   CA that signed the nico-api server cert (verifies server)
-#   nico-admin-cli.crt your admin client leaf (issued by the site admin CA)
-#   nico-admin-cli.key your admin client private key
+# Setup (one-time): `make vault-admin-cert` writes the admin mTLS material into
+# $NICO_ADMIN_CLI_CERTS (default ~/.nico):
+#   admin-ca.crt   CA that signed the nico-api server cert (verifies server)
+#   admin-tls.crt  your admin client leaf (issued from Vault's nicoca PKI)
+#   admin-tls.key  your admin client private key
 # and point API_URL at the reachable Core gRPC endpoint. The URL host must
 # match a nico-api serving-cert SAN (e.g. nico-api.nico-system.svc.cluster.local)
 # because the CLI has no server-name override.
@@ -20,7 +20,7 @@
 #
 # Env knobs:
 #   NICO_ADMIN_CLI_IMAGE     image ref (default quay.io/fdupont-redhat/nico-admin-cli:latest)
-#   NICO_ADMIN_CLI_CERTS     host dir with the 3 files above (default ~/.config/nico)
+#   NICO_ADMIN_CLI_CERTS     host dir with the 3 files above (default ~/.nico)
 #   NICO_ADMIN_CLI_ADD_HOST  optional "host:ip" added to the container (e.g. to
 #                            map the SAN name onto a `oc port-forward` endpoint:
 #                            nico-api.nico-system.svc.cluster.local:host-gateway)
@@ -28,7 +28,7 @@
 set -euo pipefail
 
 IMAGE="${NICO_ADMIN_CLI_IMAGE:-ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-admin-cli:latest}"
-CERTS_DIR="${NICO_ADMIN_CLI_CERTS:-$HOME/.config/nico}"
+CERTS_DIR="${NICO_ADMIN_CLI_CERTS:-$HOME/.nico}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-$(command -v podman 2>/dev/null || command -v docker 2>/dev/null)}"
 
 mkdir -p "$CERTS_DIR"
@@ -37,7 +37,7 @@ if [[ -z "${API_URL:-}" ]]; then
   echo "nico-admin-cli: set API_URL to the Core gRPC endpoint (https://host:1079)" >&2
   exit 2
 fi
-if [[ ! -r "$CERTS_DIR/nico-admin-cli.crt" ]]; then
+if [[ ! -r "$CERTS_DIR/admin-tls.crt" ]]; then
   echo "nico-admin-cli: missing client cert in $CERTS_DIR (see header for setup)" >&2
   exit 2
 fi
@@ -58,7 +58,7 @@ exec "$CONTAINER_RUNTIME" run --rm -i \
   ${NICO_ADMIN_CLI_ADD_HOST:+--add-host "$NICO_ADMIN_CLI_ADD_HOST"} \
   -v "$CERTS_DIR:/certs:ro,Z" \
   -e "API_URL=$API_URL" \
-  -e ROOT_CA_PATH=/certs/nico-root-ca.crt \
-  -e CLIENT_CERT_PATH=/certs/nico-admin-cli.crt \
-  -e CLIENT_KEY_PATH=/certs/nico-admin-cli.key \
+  -e ROOT_CA_PATH=/certs/admin-ca.crt \
+  -e CLIENT_CERT_PATH=/certs/admin-tls.crt \
+  -e CLIENT_KEY_PATH=/certs/admin-tls.key \
   "$IMAGE" "$@"
