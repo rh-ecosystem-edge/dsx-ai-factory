@@ -1,0 +1,97 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# Site-config TEMPLATE for the Core nico chart (deploy with SITE=<name>:
+#   make deploy-site SITE=<name>   # loads charts/values/nico-core-<name>.yaml
+#
+# Copy this file to charts/values/nico-core-<your-site>.yaml and fill in the
+# lines marked "EDIT". Layered on top of nico-core.yaml
+# (helm -f nico-core.yaml -f nico-core-<site>.yaml ...).
+#
+# Minimum required for the Core API to START (crates/api-core/src/setup.rs):
+#   * at least one [pools.*]           (required: nico-api won't start otherwise)
+#   * one [networks.admin] segment     (a DB constraint rejects a site with none)
+# Everything else ([networks.bmc], host-inband, [vpcs.*]) is OPTIONAL to boot
+# but REQUIRED to actually discover/provision hardware — uncomment and fill it.
+#
+# This template keeps secure defaults: it does NOT set bypass_rbac,
+# permissive_mode or allow_insecure_discovery (those are MAT/emulator only).
+# =============================================================================
+
+nico-api:
+  siteConfig:
+    enabled: true
+    nicoApiSiteConfig: |
+      initial_domain_name = "nico.local"   # EDIT: your site's DNS domain
+      attestation_enabled = false          # keep false unless you enforce TPM attestation
+      tpm_required = false
+
+      [site_explorer]
+      run_interval = "30s"
+      allow_zero_dpu_hosts = true          # true for zero-DPU hosts
+      dpu_policy = "ignore"
+
+      # --- Admin segment: REQUIRED to boot (DB constraint needs one admin
+      # network even without DPUs). A dummy prefix is fine if you have none.
+      # Unused without DPUs.
+      [networks.admin]
+      type = "admin"
+      prefix = "192.168.255.0/24"          # dummy OK; EDIT if you have a real admin net
+      gateway = "192.168.255.1"
+      mtu = 1500
+      reserve_first = 0
+
+      # BMC/iDRAC underlay: EDIT and uncomment. site-explorer scans this
+      # segment via Redfish to discover hardware.
+      # [networks.bmc]
+      # type = "underlay"
+      # prefix = "10.0.0.0/24"             # EDIT: your BMC/iDRAC CIDR
+      # gateway = "10.0.0.254"             # EDIT
+      # mtu = 1500
+      # reserve_first = 5
+
+      # --- Host in-band network for zero-DPU hosts: EDIT and uncomment.
+      # [networks.<your-inband>]
+      # type = "hostinband"
+      # prefix = "10.0.1.0/24"             # EDIT: your in-band CIDR
+      # gateway = "10.0.1.254"             # EDIT
+      # mtu = 1500
+      # reserve_first = 5 # 
+      # allocation_strategy = "reserved"   #DHCP only answers MACs with an
+      # existing reservation (expected-machine interfaces), never hands out
+      # dynamic leases.
+
+      # --- Resource pools: REQUIRED. EDIT the ranges to your site's
+      # allocations. IP pools use type="ipv4"; numeric pools use type="integer".
+      [pools.lo-ip]
+      type = "ipv4"
+      ranges = [{ start = "192.168.126.100", end = "192.168.126.150" }]  # EDIT: loopback IP pool
+
+      [pools.vpc-dpu-lo]
+      type = "ipv4"
+      ranges = [{ start = "10.101.0.1", end = "10.101.0.254" }]          # EDIT: DPU loopback pool
+
+      [pools.secondary-vtep-ip]
+      type = "ipv4"
+      ranges = [{ start = "10.102.0.1", end = "10.102.0.254" }]          # EDIT: secondary VTEP pool
+
+      [pools.vni]
+      type = "integer"
+      ranges = [{ start = "100000", end = "199999" }]                    # EDIT: VNI range
+
+      [pools.vpc-vni]
+      type = "integer"
+      ranges = [{ start = "0", end = "100" }]                            # EDIT: VPC VNI range
+
+      [pools.external-vpc-vni]
+      type = "integer"
+      ranges = [{ start = "300000", end = "399999" }]                    # EDIT: external VPC VNI range
+
+      [pools.vlan-id]
+      type = "integer"
+      ranges = [{ start = "100", end = "4094" }]                         # EDIT: VLAN ID range
+
+      [pools.fnn-asn]
+      type = "integer"
+      ranges = [{ start = "4200000000", end = "4200000254" }]            # EDIT: fabric ASN range

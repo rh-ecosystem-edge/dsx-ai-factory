@@ -13,8 +13,8 @@
 
 global:
   image:
-    repository: ghcr.io/rh-ecosystem-edge
-    tag: latest
+    repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory
+    tag: v0.0.1
     pullPolicy: IfNotPresent
   # The Core gRPC client cert is issued by vault-nico-issuer (Vault PKI, the
   # same CA nico-api's server cert uses) so (a) nico-api trusts the site-agent's
@@ -25,6 +25,13 @@ global:
       kind: ClusterIssuer
       name: vault-nico-issuer
       group: cert-manager.io
+
+image:
+  # Published image is infra-controller-rest-site-agent (repo naming), not the
+  # chart default nico-rest-site-agent. The chart image helper uses
+  # .Values.image.name, so override it here or the pull resolves to a
+  # non-existent nico-rest-site-agent image.
+  name: infra-controller-rest-site-agent
 
 replicaCount: 1
 

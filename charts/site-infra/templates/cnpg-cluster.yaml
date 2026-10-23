@@ -40,7 +40,10 @@ spec:
         - psm
         - nsm
         {{- end }}
-      options: "LOGIN"
+      # SUPERUSER so the nico-api migration can CREATE in the public schema
+      # (PG15 revokes CREATE on public from non-owners) and create untrusted
+      # extensions. Matches the cloud PG user and the ncp reference deploy.
+      options: "SUPERUSER"
       password:
         type: AlphaNumeric
   databaseInitSQL:

@@ -15,7 +15,8 @@ global:
     # IfNotPresent; override with --set global.image.pullPolicy=Always for local
     # tests that re-push :latest. Releases pin an immutable tag (see repo tags).
     repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-core
-    tag: latest
+    # Default tag latest
+    tag: v0.0.1
     pullPolicy: IfNotPresent
   spiffe:
     trustDomain: nico.local
@@ -54,15 +55,20 @@ nico-api:
   # Service to live in (createNamespace defaults to false upstream).
   legacyAlias:
     enabled: false
+  externalService:
+    enabled: false
+    externalTrafficPolicy: Local
+  # annotations:
+  #   metallb.universe.tf/loadBalancerIPs: "VIP"
   # x86_64 boot artifacts (scout kernel, initrd, squashfs). Replace with
   # your own image if targeting a different architecture or artifact set.
   bootArtifactContainers:
     - name: boot-artifacts-x86-64
       image: quay.io/alosadag/boot-artifacts-x86_64:latest-amd64
       command: ["sh", "-c", "cp -r /x86_64 /forge-boot-artifacts/blobs/internal"]
-    # - name: boot-artifacts-aarch64
-    #   image: <registry>/boot-artifacts-aarch64:latest
-    #   command: ["sh", "-c", "cp -r /aarch64 /apt /firmware /boot-artifacts/blobs/internal"]
+    - name: boot-artifacts-aarch64
+      image: quay.io/alosadag/boot-artifacts-aarch64:latest-amd64
+      command: ["sh", "-c", "cp -r /aarch64 /apt /forge-boot-artifacts/blobs/internal"]
   resources:
     requests:
       cpu: 250m
@@ -119,12 +125,14 @@ nico-bmc-proxy:
       secretName: vault-unseal-secret
     vaultClusterInfo:
       configMapName: vault-cluster-info
+    # Crunchy pguser secret exposes 'user' not 'username'; the fork reads the key
+    # name from envFrom.databaseCredentials.usernameKey (chart default 'username').
     databaseCredentials:
       secretName: nico-site-pg-pguser-nico
+      usernameKey: user
     databaseConfig:
       configMapName: nico-system-nico-database-config
-  database:
-    usernameKey: user
+
 nico-dhcp:
   enabled: true
   # nico-dhcp is the ONE Core service that cannot run on restricted-v2: kea must
@@ -175,6 +183,11 @@ nico-dhcp:
         - subnet: "0.0.0.0/0"
           pools:
             - "0.0.0.0-255.255.255.255"
+  externalService:
+    enabled: false
+    # annotations:
+    #  metallb.universe.tf/loadBalancerIPs: "VIP"
+
 nico-dns:
   enabled: true
   replicas: 1
@@ -190,10 +203,10 @@ nico-dns:
     # from values. Port 53 externally, 5353 inside the container.
     targetPort: 5353
     ports:
-      - port: 5353
+      - port: 53
         name: tcp
         protocol: TCP
-      - port: 5353
+      - port: 53
         name: udp
         protocol: UDP
   # Disabled upstream — binary not ready for production (requires forge-roots
@@ -215,13 +228,18 @@ nico-pxe:
     enabled: false
   # x86_64 boot artifacts (scout kernel, initrd, squashfs). Replace with
   # your own image if targeting a different architecture or artifact set.
+  externalService:
+    enabled: false
+    # annotations:
+      # metallb.universe.tf/loadBalancerIPs: "VIP"
   bootArtifactContainers:
     - name: boot-artifacts-x86-64
       image: quay.io/alosadag/boot-artifacts-x86_64:latest-amd64
       command: ["sh", "-c", "cp -r /x86_64 /forge-boot-artifacts/blobs/internal"]
-    # - name: boot-artifacts-aarch64
-    #   image: <registry>/boot-artifacts-aarch64:latest
-    #   command: ["sh", "-c", "cp -r /aarch64 /apt /firmware /boot-artifacts/blobs/internal"]
+    - name: boot-artifacts-aarch64
+      image: quay.io/alosadag/boot-artifacts-aarch64:latest-amd64
+      command: ["sh", "-c", "cp -r /aarch64 /apt /forge-boot-artifacts/blobs/internal"]
+
 nico-ssh-console-rs:
   enabled: true
   # Drop the chart's default IPC_LOCK capability (see nico-api).
@@ -258,6 +276,7 @@ nico-ssh-console-rs:
       api_poll_interval = "180s"
       console_logging_enabled = true
       console_logs_path = "/var/log/consoles"
+
 # dockurr/chrony's entrypoint chowns /run/chrony, which fails under
 # OpenShift's arbitrary non-root UID. Not in our documented topology or
 # required by machine-a-tron testing.
@@ -275,15 +294,26 @@ unbound:
   # containerPort from this value so probes and Deployment ports match.
   containerPort: 5353
   # The Red Hat UBI image has no shell (/bin/sh) — it's a minimal image with
-  # only the unbound binary at /usr/sbin/unbound. The main config is injected
-  # via kustomize patch (fix-unbound-config.yaml) because the chart's
-  # configmap.yaml template only renders hardcoded keys from localConfig.
+  # only the unbound binary at /usr/sbin/unbound. Inject the main config via the
+  # chart's unbound.mainConfig value (fork fix/openshift-compatibility): the
+  # configmap renders it as unbound.cfg alongside the hardcoded localConfig keys.
   command: ["/usr/sbin/unbound"]
   args: ["-d", "-c", "/etc/unbound/local.conf.d/unbound.cfg"]
-  # externalService:
-  #   enabled: true
-  #   annotations:
-  #     metallb.universe.tf/loadBalancerIPs: "<UNBOUND_LB_IP>"
+  unbound:
+    mainConfig: |
+      server:
+        interface: 0.0.0.0@5353
+        interface: ::0@5353
+        access-control: 0.0.0.0/0 allow
+        access-control: ::0/0 allow
+        chroot: ""
+        pidfile: "/tmp/unbound.pid"
+        username: ""
+      include: "/etc/unbound/local.conf.d/*.conf"
+  externalService:
+    enabled: false
+  # annotations:
+  #   metallb.universe.tf/loadBalancerIPs: "<UNBOUND_LB_IP>"
   # localConfig:
   #   forwarders.conf: |
   #     forward-zone:
@@ -306,14 +336,16 @@ nico-flow:
   images:
     flow:
       repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-flow
-      tag: latest
+      tag: v0.0.1
   database:
     host: nico-site-pg-primary
     port: 5432
-    usernameKey: user
     certPath: ""
+    # Crunchy pguser secret exposes 'user'; the fork reads the key name from
+    # database.flow.usernameKey (note the .flow. level), chart default 'username'.
     flow:
       name: flow
+      usernameKey: user
       credentialsSecret: nico-site-pg-pguser-nico
   nicoCoreApi:
     url: nico-api:1079

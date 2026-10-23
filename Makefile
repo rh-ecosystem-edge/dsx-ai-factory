@@ -432,11 +432,9 @@ deploy-site: ensure-ssh-host-key ## Deploy NICo Core (use SITE= to select per-si
 		$(NICO_CORE_CHART) --wait --timeout 10m \
 		-f $(NICO_CORE_VALUES) -f $(SITE_VALUES) \
 		--set global.image.repository="$(IMAGE_REGISTRY)/infra-controller-core" \
-		--set global.image.tag="$(IMAGE_TAG)" \
 		--set 'nico-api.certificate.extraDnsNames[0]=carbide-api.forge' \
 		--set 'nico-api.certificate.extraDnsNames[1]=nico-api-grpc-nico-system.$(CLUSTER_DOMAIN)' \
-		$(DATAPLANE_VIP_SET) \
-		--post-renderer $(POST_RENDERER) --post-renderer-args $(SITE_KUSTOMIZE)
+		$(DATAPLANE_VIP_SET)
 	@oc get route nico-api-grpc -n nico-system >/dev/null 2>&1 || \
 		oc create route passthrough nico-api-grpc --service=nico-api --port=grpc -n nico-system
 
@@ -467,30 +465,37 @@ endif
 			--data-urlencode "client_id=ncx-service" \
 			--data-urlencode "client_secret=$$_CLIENT_SECRET" | jq -r .access_token) && \
 		{ [ -n "$$TOKEN" ] && [ "$$TOKEN" != null ] || { echo "ERROR: failed to acquire token"; exit 1; }; } && \
-		echo "=== Creating site: $(SITE_NAME) ===" && \
-		SITE_JSON=$$(curl -sk -X POST -H "Authorization: Bearer $$TOKEN" \
+		echo "=== Site: $(SITE_NAME) ===" && \
+		_SITE_HTTP=$$(curl -sk -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $$TOKEN" \
 			-H "Content-Type: application/json" \
 			-d "{\"name\":\"$(SITE_NAME)\",\"description\":\"$(SITE_DESCRIPTION)\"}" \
 			"$(API_URL)/v2/org/ncx/nico/site") && \
-		SITE_ID_VAL=$$(echo "$$SITE_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])") && \
-		OTP=$$(echo "$$SITE_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['registrationToken'])") && \
+		if [ "$$_SITE_HTTP" = "200" ] || [ "$$_SITE_HTTP" = "201" ]; then echo "  -> created new site"; \
+		elif [ "$$_SITE_HTTP" = "409" ]; then echo "  -> site already exists, reusing"; \
+		else echo "  -> WARNING: unexpected HTTP $$_SITE_HTTP from create (continuing via lookup)"; fi && \
+		SITE_JSON=$$(curl -sk -H "Authorization: Bearer $$TOKEN" "$(API_URL)/v2/org/ncx/nico/site") && \
+		SITE_ID_VAL=$$(echo "$$SITE_JSON" | python3 -c "import json,sys; m=[s for s in json.load(sys.stdin) if s.get('name')=='$(SITE_NAME)']; print(m[0]['id'] if m else '')") && \
+		OTP=$$(echo "$$SITE_JSON" | python3 -c "import json,sys; m=[s for s in json.load(sys.stdin) if s.get('name')=='$(SITE_NAME)']; print((m[0].get('registrationToken') or '') if m else '')") && \
+		{ [ -n "$$SITE_ID_VAL" ] || { echo 'ERROR: cannot resolve site id for $(SITE_NAME)'; exit 1; }; } && \
 		echo "Site ID: $$SITE_ID_VAL" && \
 		oc create namespace nico-system 2>/dev/null || true && \
-		CA_CERT=$$(oc get secret nico-root-ca-secret -n cert-manager \
-			-o jsonpath='{.data.ca\.crt}' | base64 -d) && \
-		oc delete secret site-registration -n nico-system 2>/dev/null || true && \
-		oc create secret generic site-registration -n nico-system \
-			--from-literal=site-uuid="$$SITE_ID_VAL" \
-			--from-literal=otp="$$OTP" \
-			--from-literal=creds-url=https://nico-rest-site-manager.nico-rest:8100/v1/sitecreds \
-			--from-literal=cacert="$$CA_CERT"; \
+		if oc get secret site-registration -n nico-system >/dev/null 2>&1; then \
+			echo "  -> site-registration secret already exists, keeping it (delete it to re-register)"; \
+		else \
+			{ [ -n "$$OTP" ] || { echo 'ERROR: no registrationToken for $(SITE_NAME) (already paired? delete the site-registration secret only if you intend to re-register)'; exit 1; }; } && \
+			CA_CERT=$$(oc get secret nico-root-ca-secret -n cert-manager \
+				-o jsonpath='{.data.ca\.crt}' | base64 -d) && \
+			oc create secret generic site-registration -n nico-system \
+				--from-literal=site-uuid="$$SITE_ID_VAL" \
+				--from-literal=otp="$$OTP" \
+				--from-literal=creds-url=https://nico-rest-site-manager.nico-rest:8100/v1/sitecreds \
+				--from-literal=cacert="$$CA_CERT"; \
+		fi; \
 	fi && \
 	echo "=== Deploying site-agent ===" && \
 	helm upgrade --install -n nico-system nico-rest-site-agent \
 		$(NICO_SITE_AGENT_CHART) --wait --timeout 5m \
 		-f $(SITE_AGENT_VALUES) \
-		--set global.image.repository="$(IMAGE_REGISTRY)" \
-		--set global.image.tag="$(IMAGE_TAG)" \
 		--set envConfig.CLUSTER_ID=$$SITE_ID_VAL \
 		--set envConfig.TEMPORAL_SUBSCRIBE_NAMESPACE=$$SITE_ID_VAL \
 		--set bootstrap.enabled=true

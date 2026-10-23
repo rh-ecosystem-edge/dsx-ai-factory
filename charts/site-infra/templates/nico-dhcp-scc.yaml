@@ -1,0 +1,88 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+
+Custom SCC for nico-dhcp. The kea DHCP server must bind the privileged UDP
+port 67 and, on modern CRI-O, the NET_BIND_SERVICE capability is only effective
+for an actual root process (uid 0) — see the nico-dhcp.containerSecurityContext
+rationale in charts/values/nico-core.yaml. OpenShift's restricted-v2 SCC forbids
+runAsUser=0 and added capabilities, so nico-dhcp needs a dedicated minimal SCC:
+it allows uid 0 + NET_BIND_SERVICE and drops every other capability.
+
+This replaces the helm/openshift/nico-dhcp-scc.yaml that was referenced by the
+values comment but lost in the ncp->midstream port. The SCC is granted to the
+nico-dhcp ServiceAccount (created by the nico-core chart) via a namespaced
+RoleBinding to the auto-generated system:openshift:scc:nico-dhcp-scc ClusterRole.
+*/}}
+---
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: nico-dhcp-scc
+  labels:
+    {{- include "nvidia-infra-controller-site-infra.labels" . | nindent 4 }}
+# Privileged host access stays off; only uid 0 + NET_BIND_SERVICE are relaxed.
+allowPrivilegedContainer: false
+allowPrivilegeEscalation: true
+allowHostNetwork: false
+allowHostPorts: false
+allowHostPID: false
+allowHostIPC: false
+allowHostDirVolumePlugin: false
+readOnlyRootFilesystem: false
+defaultAddCapabilities: null
+requiredDropCapabilities:
+  - ALL
+allowedCapabilities:
+  - NET_BIND_SERVICE
+runAsUser:
+  type: RunAsAny
+seLinuxContext:
+  type: MustRunAs
+fsGroup:
+  type: RunAsAny
+supplementalGroups:
+  type: RunAsAny
+seccompProfiles:
+  - runtime/default
+volumes:
+  - configMap
+  - downwardAPI
+  - emptyDir
+  - persistentVolumeClaim
+  - projected
+  - secret
+users: []
+groups: []
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nico-dhcp-scc-use
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvidia-infra-controller-site-infra.labels" . | nindent 4 }}
+rules:
+  # Explicit "use" on the custom SCC — more reliable than binding to the
+  # auto-generated system:openshift:scc:<name> ClusterRole, which is not
+  # guaranteed to exist for custom SCCs.
+  - apiGroups: ["security.openshift.io"]
+    resources: ["securitycontextconstraints"]
+    resourceNames: ["nico-dhcp-scc"]
+    verbs: ["use"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nico-dhcp-scc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvidia-infra-controller-site-infra.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nico-dhcp-scc-use
+subjects:
+  - kind: ServiceAccount
+    name: nico-dhcp
+    namespace: {{ .Release.Namespace }}
