@@ -1,5 +1,5 @@
 {
   "ubi10/ubi-micro": "sha256:1c105e547de5d9e0bc20d06ebabee73b20bc6bba994c50ae3e207684fd8bef2b",
-  "ubi10/ubi-minimal": "sha256:c769ab6615ab32d02d5b3d65ff2eae6bc668ba823e77f46b78a4181f54d17a27",
-  "ubi10/ubi": "sha256:8093e25343aaa386bb9d5dee1cc575195baaf807dad4daaa2d43b51ab4f83e16"
+  "ubi10/ubi-minimal": "",
+  "ubi10/ubi": ""
 }
