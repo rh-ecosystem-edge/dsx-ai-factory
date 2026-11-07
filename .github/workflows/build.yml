@@ -51,6 +51,9 @@ jobs:
           - name: infra-controller-cli
             dockerfile: docker/infra-controller/Dockerfile.infra-controller-cli
             context: components/infra-controller/rest-api/
+          - name: health-validation
+            dockerfile: docker/health-validation/Dockerfile.health-validation
+            context: components/health-validation/
     steps:
       - name: Checkout
         uses: actions/checkout@v4

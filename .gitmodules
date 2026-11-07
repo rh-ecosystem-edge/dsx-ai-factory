@@ -10,3 +10,6 @@
 [submodule "components/rms"]
 	path = components/nv-rms
 	url = https://github.com/fabiendupont/nv-rms
+[submodule "components/health-validation"]
+	path = components/health-validation
+	url = https://github.com/dsx-ai-factory/health-validation
