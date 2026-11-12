@@ -34,6 +34,9 @@ jobs:
           - name: fia
             upstream: dsx-ai-factory/fleet-intelligence-agent
             path: components/fia
+          - name: health-validation
+            upstream: dsx-ai-factory/health-validation
+            path: components/health-validation
           - name: gpu-operator
             upstream: NVIDIA/gpu-operator
             path: components/gpu-operator

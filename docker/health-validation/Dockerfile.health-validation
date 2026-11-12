@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Health Validation — UBI-based image for the DSX AI Factory health validation toolkit.
+# Build context: components/health-validation/
+
+FROM registry.access.redhat.com/ubi10/go-toolset:latest AS builder
+USER root
+ENV GOTOOLCHAIN=auto
+WORKDIR /src
+COPY go.work go.mod ./
+COPY toolkit/go.mod toolkit/go.sum toolkit/
+COPY catalog/go.mod catalog/go.sum catalog/
+COPY collect/go.mod collect/go.sum collect/
+COPY agentkit/go.mod agentkit/go.sum agentkit/
+RUN cd toolkit && go mod download
+COPY . .
+RUN CGO_ENABLED=1 go build -buildvcs=false -o /health-validation ./toolkit/cmd/health-validation
+
+FROM registry.access.redhat.com/ubi10/ubi-micro:latest
+
+LABEL name="health-validation" \
+      summary="DSX AI Factory Health Validation — point-in-time node readiness checks" \
+      description="Evaluates GPU, NVLink, CPU, NUMA, and RDMA health on AI Factory nodes" \
+      io.k8s.display-name="Health Validation" \
+      io.k8s.description="NVIDIA DSX AI Factory Health Validation toolkit" \
+      com.redhat.component="health-validation"
+
+COPY --from=builder /health-validation /health-validation
+
+USER 65534
+
+ENTRYPOINT ["/health-validation"]

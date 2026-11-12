@@ -42,6 +42,16 @@ AI Factory nodes:
 - PDU power control and monitoring
 - Hardware inventory for switches and rack-level components
 
+### AI Factory node components
+
+**[Health Validation](https://github.com/dsx-ai-factory/health-validation)** is a
+point-in-time readiness gate that evaluates GPU, NVLink, CPU, NUMA, and RDMA
+health on AI Factory nodes. It runs on demand, produces a structured
+PASS/WARNING/CRITICAL verdict per node, and exits. It complements continuous
+monitoring (DCGM Exporter) by encoding NVIDIA's expert thresholds into
+CEL-based rules, so downstream systems can act on the exit code or JSON result
+without writing custom alerting rules.
+
 ### OLM operators (prerequisites)
 
 | Operator | Purpose |
