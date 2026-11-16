@@ -1,40 +1,49 @@
 # Patches for nico
 
 `components/nico` is in **patch state** — the submodule points to
-`https://github.com/fabiendupont/nvidia-infra-controller` at branch
-`fix/openshift-compatibility` (tip `5cf087e7c`), which contains 12 Helm chart
-OpenShift compatibility fixes on top of `dsx-ai-factory/infra-controller@main`.
+`https://github.com/rh-ecosystem-edge/infra-controller` at tag
+`v2.5.0-pr-ocp-v1` (commit `5a8745f44`), which is
+`dsx-ai-factory/infra-controller@v2.5.0-pr` plus one integration commit
+(`041e5b44b`, merged via PR #2 on the fork).
 
 `watch-upstream.yml` monitors `dsx-ai-factory/infra-controller` for a new
 release tag and opens a PR when one is detected.
 
-## Active patches (12 commits, not yet submitted upstream)
+## Active patches (1 squash commit, not yet submitted upstream)
 
-All patches are Helm chart fixes required for OpenShift compatibility. They are
-logically one set and will be submitted as a single PR (or a small set of PRs)
-against `dsx-ai-factory/infra-controller`.
+The single commit on top of `v2.5.0-pr` bundles several previously-separate
+efforts:
+
+- OpenShift Helm/securityContext compatibility fixes (continuation of the
+  patch set previously tracked against the `fabiendupont/nvidia-infra-controller`
+  fork: conditional site-config mount, flow Namespace guard, REST API
+  caBundle, containerSecurityContext hardening across `nico-dhcp`,
+  `nico-pxe`, `nico-dns`, `nico-bmc-proxy`, `nico-ntp`,
+  `nico-hardware-health`, `nico-dsx-exchange-consumer`, `nico-rest-db`
+  migration job PGSSLMODE, `nico-api` migration job pg_isready/backoffLimit).
+- PostgreSQL TLS support (Go code in `rest-api/db/pkg/db`, `cmd/migrations`).
+- External DPF / capability-selector integration (`crates/dpf`,
+  `crates/api-core/src/dpf_services.rs`).
+- Hosted OpenShift DPU agent chart (`bluefield/charts/nico-dpu-agent`).
+- New OpenShift Helm value presets
+  (`helm-prereqs/values/nico-{core,flow,rest}-openshift.yaml`).
 
 | Commit | Summary |
 |--------|---------|
-| `5cf087e` | fix(helm): conditional site-config mount, flow Namespace guard, REST API caBundle |
-| `5138d32` | fix(helm): extend containerSecurityContext to nico-bmc-proxy, nico-flow, nico-ntp |
-| `b058ade` | docs(helm): standardize OpenShift podSecurityContext override guidance |
-| `6e3ccd6` | ci(helm): assert nico-rest pod securityContext stays overridable |
-| `5192b52` | fix(helm): harden Core container securityContext with allowPrivilegeEscalation |
-| `ff87a67` | fix(helm/nico-rest): make pod securityContext configurable across services |
-| `61b4ab6` | fix(helm/nico-dhcp): add emptyDir volumes for Kea runtime directories |
-| `be269ec` | fix(helm/nico-rest-db): add configurable PGSSLMODE to migration job |
-| `f1a0dac` | fix(helm/nico-rest-db): add imagePullPolicy to wait-for-postgres init container |
-| `b26dcc0` | fix(helm/nico-api): add pg_isready init container and backoffLimit to migration job |
-| `6a03f5b` | fix(helm): make database secret username key configurable |
-| `5e5b338` | fix(helm): make container securityContext configurable across all service charts |
+| `041e5b44b` | Integrate OpenShift NICo and external DPF for RH next |
+| `5a8745f44` | Merge pull request #2 from rh-ecosystem-edge/integration/initial-upstream-pr |
 
-- **Upstream PR**: https://github.com/dsx-ai-factory/infra-controller/pull/4372 (open)
-- **Fork tag**: `fabiendupont/nvidia-infra-controller@rh/v2.2.0-openshift-compat` (branch was rebased upstream; tag preserves our v2.2.0-based commit)
+- **Prior upstream PR**: https://github.com/dsx-ai-factory/infra-controller/pull/4372
+  (covered only the original Helm-only subset of these fixes against an
+  older base; **needs review** to determine whether it still applies as-is or
+  must be split/superseded, since this commit also carries unrelated PG
+  TLS/DPF/DPU-agent work that was never part of that PR).
+- **Fork tag**: `rh-ecosystem-edge/infra-controller@v2.5.0-pr-ocp-v1`
 
 ## Resolving
 
-1. Submit patches upstream to `dsx-ai-factory/infra-controller` and record PR URLs above.
+1. Submit patches upstream to `dsx-ai-factory/infra-controller` (reconciling
+   with PR #4372 as needed) and record PR URLs above.
 2. When merged and a new release tag is available, merge the `watch-upstream.yml` PR.
 3. Delete this file and `patches/infra-controller/`.
-4. Remove `"components/nico"` from `matchDepNames` in `renovate.json`.
+4. Remove `"components/infra-controller"` from `matchDepNames` in `renovate.json`.

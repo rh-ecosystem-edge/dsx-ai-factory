@@ -1,6 +1,6 @@
 [submodule "components/nico"]
 	path = components/infra-controller
-	url = https://github.com/fabiendupont/nvidia-infra-controller
+	url = https://github.com/rh-ecosystem-edge/infra-controller
 [submodule "components/nvsentinel"]
 	path = components/nvsentinel
 	url = https://github.com/NVIDIA/NVSentinel
