@@ -37,15 +37,18 @@ design:
 1. **`charts/values/nico-core.yaml`** (base). It turns the right components on and
    off for OpenShift and ships with **`siteConfig` disabled on purpose**, so a
    bare deploy never brings up a half-configured site.
-2. **`charts/values/nico-core-<site>.yaml`** (per-site overlay). It carries the
-   real thing: the **network segments** (OOB/BMC, admin, host-inband) and the
+2. **`charts/values/nico-core-<site>.yaml`** (per-site Core overlay). It carries
+   the real thing: the **network segments** (OOB/BMC, admin, host-inband) and the
    **resource pools** the Core API needs to start.
+3. **`charts/values/infra-site-<site>.yaml`** (per-site infrastructure overlay).
+   It defines the site MetalLB address pool and optional node-network settings.
 
-Create your per-site file from the documented template and fill it in:
+Create both per-site files from the documented templates and fill them in:
 
 ```bash
-cp charts/values/nico-core-site-example.yaml charts/values/nico-core-<site>.yaml
-# Edit the lines marked EDIT: your [networks.*] segments and [pools.*].
+make create-site-values SITE=<site>
+# Edit the lines marked EDIT: your [networks.*] segments, [pools.*], and
+# MetalLB address pool.
 # At minimum the Core API needs one [pools.*] and one [networks.admin]
 # segment — it will not start otherwise.
 ```
