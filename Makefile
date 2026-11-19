@@ -453,6 +453,7 @@ deploy-site: ensure-ssh-host-key ## Deploy NICo Core (use SITE= to select per-si
 	helm upgrade --install -n nico-system nico-core \
 		$(NICO_CORE_CHART) --wait --timeout 10m \
 		-f $(NICO_CORE_VALUES) -f $(SITE_VALUES) \
+		--post-renderer kustomize-post-renderer \
 		--set global.image.repository="$(IMAGE_REGISTRY)/infra-controller-core" \
 		--set 'nico-api.certificate.extraDnsNames[0]=carbide-api.forge' \
 		--set 'nico-api.certificate.extraDnsNames[1]=nico-api-grpc-nico-system.$(CLUSTER_DOMAIN)' \

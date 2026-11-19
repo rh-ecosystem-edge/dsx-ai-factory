@@ -221,8 +221,18 @@ nico-hardware-health:
   containerSecurityContext: null
 nico-pxe:
   enabled: true
-  # Drop the chart's default SYS_PTRACE capability (see nico-api).
-  containerSecurityContext: null
+  # This namespace's SCC-assigned range (openshift.io/sa.scc.uid-range) is
+  # 1001090000/10000, which excludes the chart's hardcoded UID/GID 10001.
+  # Null the runAsUser/runAsGroup/fsGroup fields *inside* the maps (not the
+  # whole key — a top-level null falls back to the chart's 10001 default
+  # instead of removing it, see this chart's values.yaml) so OpenShift's SCC
+  # assigns both from the namespace range.
+  containerSecurityContext:
+    runAsNonRoot: true
+    runAsUser: null
+    runAsGroup: null
+  podSecurityContext:
+    fsGroup: null
   # Same as nico-api.legacyAlias above — forge-system namespace we don't own.
   legacyAlias:
     enabled: false
@@ -235,14 +245,19 @@ nico-pxe:
   bootArtifactContainers:
     - name: boot-artifacts-x86-64
       image: quay.io/alosadag/boot-artifacts-x86_64:latest-amd64
-      command: ["sh", "-c", "set -e; cp -r /x86_64 /forge-boot-artifacts/blobs/internal; chgrp -R 10001 /forge-boot-artifacts/blobs/internal/x86_64; chmod -R g+rX /forge-boot-artifacts/blobs/internal/x86_64"]
+      # No chgrp: fsGroup is SCC-assigned (see above), and Kubernetes
+      # recursively group-owns + setgid's emptyDir volumes for it, so files
+      # written here inherit the right group automatically regardless of
+      # which UID the container runs as.
+      command: ["sh", "-c", "set -e; cp -r /x86_64 /forge-boot-artifacts/blobs/internal; chmod -R g+rX /forge-boot-artifacts/blobs/internal/x86_64"]
     - name: boot-artifacts-aarch64
       image: quay.io/alosadag/boot-artifacts-aarch64:latest-amd64
-      command: ["sh", "-c", "set -e; cp -r /aarch64 /apt /forge-boot-artifacts/blobs/internal; chgrp -R 10001 /forge-boot-artifacts/blobs/internal/aarch64 /forge-boot-artifacts/blobs/internal/apt; chmod -R g+rX /forge-boot-artifacts/blobs/internal/aarch64 /forge-boot-artifacts/blobs/internal/apt"]
+      command: ["sh", "-c", "set -e; cp -r /aarch64 /apt /forge-boot-artifacts/blobs/internal; chmod -R g+rX /forge-boot-artifacts/blobs/internal/aarch64 /forge-boot-artifacts/blobs/internal/apt"]
   # The infra-controller chart's own permissions initContainer needs UID 0 +
   # CHOWN/FOWNER/DAC_OVERRIDE, which OpenShift's restricted-v2 SCC rejects.
-  # bootArtifactContainers above already chgrp/chmod their copied files for
-  # the 10001 serving group, so the privileged backstop isn't needed here.
+  # bootArtifactContainers above already chmod their copied files group-
+  # readable, and fsGroup (above) handles group ownership, so the privileged
+  # backstop isn't needed here.
   bootArtifacts:
     fixPermissions: false
 

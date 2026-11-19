@@ -2,12 +2,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Helm post-renderer plugin that applies Kustomize patches to rendered manifests.
-# Usage: helm install ... --post-renderer kustomize-post-renderer --post-renderer-args <kustomize-dir>
+# Helm post-renderer plugin. Always auto-numbers subnet4[].id in any
+# kea_config.json ConfigMap (see below); optionally also applies Kustomize
+# patches when a directory is given.
+# Usage: helm install ... --post-renderer kustomize-post-renderer [--post-renderer-args <kustomize-dir>]
 
 set -euo pipefail
 
-KUSTOMIZE_DIR="${1:?Usage: --post-renderer-args <path-to-kustomize-dir>}"
+KUSTOMIZE_DIR="${1:-}"
 
 TMPDIR=$(mktemp -d)
 trap "rm -rf $TMPDIR" EXIT
@@ -59,6 +61,11 @@ for doc in docs:
     print('---')
     print(yaml.dump(doc, default_flow_style=False, width=200), end='')
 " > "$TMPDIR/all.yaml"
+
+if [ -z "$KUSTOMIZE_DIR" ]; then
+  cat "$TMPDIR/all.yaml"
+  exit 0
+fi
 
 cp -r "$KUSTOMIZE_DIR/"* "$TMPDIR/"
 
