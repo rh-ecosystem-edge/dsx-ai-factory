@@ -102,7 +102,7 @@ vault:
     shareProcessNamespace: true
     extraContainers:
       - name: vault-cert-reload
-        image: registry.access.redhat.com/ubi10/ubi-minimal:latest
+        image: registry.access.redhat.com/ubi9/ubi-minimal:9.6
         command:
           - /bin/sh
           - -c

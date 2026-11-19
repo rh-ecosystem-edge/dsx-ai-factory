@@ -12,9 +12,10 @@
 # =============================================================================
 
 global:
+  imagePullSecrets: []
   image:
     repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory
-    tag: v0.0.1
+    tag: 827e9e274-rh.1
     pullPolicy: IfNotPresent
   # The Core gRPC client cert is issued by vault-nico-issuer (Vault PKI, the
   # same CA nico-api's server cert uses) so (a) nico-api trusts the site-agent's
@@ -88,3 +89,21 @@ envConfig:
   TEMPORAL_INVENTORY_SCHEDULE: "@every 3m"
   TEMPORAL_CERT_PATH: "/etc/temporal-certs"
   TEMPORAL_CERT: "temporal-client-site-agent-certs"
+
+livenessProbe:
+  enabled: true
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 600
+  periodSeconds: 30
+  failureThreshold: 5
+
+readinessProbe:
+  enabled: true
+  httpGet:
+    path: /readyz
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  failureThreshold: 30

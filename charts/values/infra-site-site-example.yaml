@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# Site network TEMPLATE for the site-infra chart (deploy with SITE=<name>:
+#   make deploy-site-infra SITE=<name>   # loads charts/values/infra-site-<name>.yaml
+#
+# Copy this file to charts/values/infra-site-<your-site>.yaml and fill in the
+# lines marked "EDIT". Layered on top of charts/site-infra/values.yaml's
+# defaults (helm -f infra-site-<site>.yaml ...); see that file for the full
+# documented schema, including the l2 vs bgp trade-offs and nodeNetwork.
+#
+# Every VIP pinned on a nico-core Service (via DATAPLANE_VIP_<SITE> in
+# deploy.env) MUST fall inside one of the addressPools ranges below.
+# =============================================================================
+
+metallb:
+  # bgp — advertise each VIP /32 to the ToR/fabric over BGP (production).
+  # l2  — gratuitous-ARP a VIP from one node (single-subnet / lab fallback).
+  mode: bgp                                    # EDIT: bgp or l2
+  addressPools:
+    - name: site-vips
+      addresses:
+        - "0.0.0.0/32"                         # EDIT: this site's VIP range, e.g. 192.168.100.0/28
+      autoAssign: false
+  # Used when mode=l2. Empty interfaces => advertise on all.
+  l2:
+    interfaces: []                             # EDIT if pinning to a dedicated NIC
+  # Used when mode=bgp. Peer with the ToR/leaf fabric.
+  bgp:
+    localASN: 0                                # EDIT: this cluster's ASN
+    peers:
+      - name: tor
+        peerASN: 0                             # EDIT: ToR/fabric ASN
+        peerAddress: "0.0.0.0"                 # EDIT: ToR/fabric peering address
+        peerPort: 179
+    advertisement:
+      aggregationLength: 32
+      communities: []
+      localPref: 0
+
+# Static IP on the dataplane NIC (NodeNetworkConfigurationPolicy via
+# kubernetes-nmstate) so MetalLB can ARP/advertise the VIP on that VLAN.
+# Leave disabled for a flat network (VIPs on the primary/cluster network).
+nodeNetwork:
+  enabled: false                               # EDIT: true if using a dedicated provisioning NIC
+  interface: ""                                # EDIT: e.g. ens1f0
+  address: ""                                  # EDIT: this node's static IP on that NIC
+  prefixLength: 24                             # EDIT
