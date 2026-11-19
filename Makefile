@@ -18,7 +18,7 @@ SHELL := /bin/bash
 .PHONY: deploy-prereqs deploy-cloud-infra deploy-cloud deploy-all-cloud
 .PHONY: patch-keycloak-route bootstrap-org
 .PHONY: deploy-site-infra vault-init vault-admin-cert ensure-ssh-host-key deploy-site
-.PHONY: deploy-site-agent deploy-rms
+.PHONY: deploy-site-agent deploy-rms ensure-rms-pvc
 .PHONY: create-site-values patch-ovn-gateway deploy-dataplane-vip
 .PHONY: verify-prereqs-deployed verify-infra-deployed verify-core-deployed verify-dataplane-vip
 .PHONY: status undeploy
@@ -32,11 +32,17 @@ SHELL := /bin/bash
 
 # Image registry for DSX AI Factory images
 IMAGE_REGISTRY ?= ghcr.io/rh-ecosystem-edge/dsx-ai-factory
-IMAGE_TAG      ?= latest
+# Empty by default so each chart's own pinned global.image.tag wins; set
+# IMAGE_TAG=<tag> on the command line to override it (e.g. for a local test
+# build). A floating `latest` default previously let the deployed image
+# silently drift out of sync with the chart (see nico-rest-site-manager
+# CrashLoopBackOff on an unrecognized --creds-manager-ca-path flag).
+IMAGE_TAG      ?=
 
 # Upstream chart paths (git submodules)
 UPSTREAM      := components/infra-controller
 RMS_UPSTREAM  := components/nv-rms
+RMS_VALUES    ?= charts/values/nv-rms.yaml
 
 NICO_REST_CHART       := $(UPSTREAM)/helm/rest/nico-rest
 NICO_CORE_CHART       := $(UPSTREAM)/helm
@@ -121,7 +127,6 @@ POST_RENDERER_DIR := $(CURDIR)/scripts/kustomize-post-renderer
 POST_RENDERER     := kustomize-post-renderer
 export PATH       := $(POST_RENDERER_DIR):$(PATH)
 SITE_KUSTOMIZE    := $(CURDIR)/scripts/kustomize/nico-core
-CLOUD_KUSTOMIZE   := $(CURDIR)/scripts/kustomize/nico-rest
 
 # Keycloak and REST API URLs
 KC_URL  := https://keycloak-rhbk-operator.$(CLUSTER_DOMAIN)
@@ -253,13 +258,11 @@ deploy-cloud: ## Deploy NICo REST API services
 	helm upgrade --install -n nico-rest nico-rest \
 		$(NICO_REST_CHART) --wait --timeout 10m \
 		-f $(NICO_REST_VALUES) \
-		--post-renderer kustomize-post-renderer \
-		--post-renderer-args $(CLOUD_KUSTOMIZE) \
 		--set-file nico-rest-api.caBundle=<(oc get secret nico-root-ca-secret -n cert-manager -o jsonpath='{.data.ca\.crt}' | base64 -d) \
 		--set nico-rest-api.config.keycloak.externalBaseURL=https://keycloak-rhbk-operator.$(CLUSTER_DOMAIN) \
 		--set nico-rest-common.secrets.keycloakClientSecret.value="$(KEYCLOAK_CLIENT_SECRET)" \
 		--set global.image.repository="$(IMAGE_REGISTRY)" \
-		--set global.image.tag="$(IMAGE_TAG)"
+		$(if $(IMAGE_TAG),--set global.image.tag="$(IMAGE_TAG)")
 
 deploy-all-cloud: deploy-prereqs deploy-cloud-infra deploy-cloud ## Deploy all cloud components, patch Keycloak route, and bootstrap org
 	$(MAKE) patch-keycloak-route
@@ -280,11 +283,26 @@ bootstrap-org: ## Create Infrastructure Provider and default Tenant via NICo RES
 		-o jsonpath='{.data.username}' | base64 -d) && \
 	_ADMIN_PASS=$$(oc get secret keycloak-admin-secret -n rhbk-operator \
 		-o jsonpath='{.data.password}' | base64 -d) && \
-	_ADMIN_TOKEN=$$(curl -sk -X POST "$(KC_URL)/realms/master/protocol/openid-connect/token" \
-		-d grant_type=password -d client_id=admin-cli \
-		-d "username=$$_ADMIN_USER" -d "password=$$_ADMIN_PASS" | jq -r .access_token) && \
-	_CLIENT_UUID=$$(curl -sk -H "Authorization: Bearer $$_ADMIN_TOKEN" \
-		"$(KC_URL)/admin/realms/nico/clients?clientId=ncx-service" | jq -r '.[0].id') && \
+		_ADMIN_TOKEN="" && \
+		for attempt in $$(seq 1 30); do \
+			_ADMIN_TOKEN=$$(curl -sk -X POST "$(KC_URL)/realms/master/protocol/openid-connect/token" \
+				-d grant_type=password -d client_id=admin-cli \
+				-d "username=$$_ADMIN_USER" -d "password=$$_ADMIN_PASS" | jq -r '.access_token // empty') && \
+			if [ -n "$$_ADMIN_TOKEN" ] && [ "$$_ADMIN_TOKEN" != null ]; then break; fi && \
+			echo "Waiting for Keycloak master realm... ($$attempt/30)" && \
+			sleep 5; \
+		done && \
+		{ [ -n "$$_ADMIN_TOKEN" ] && [ "$$_ADMIN_TOKEN" != null ] || { echo "ERROR: failed to acquire Keycloak admin token"; exit 1; }; } && \
+		_CLIENT_UUID="" && \
+		for attempt in $$(seq 1 30); do \
+			_CLIENTS_JSON=$$(curl -sk -H "Authorization: Bearer $$_ADMIN_TOKEN" \
+				"$(KC_URL)/admin/realms/nico/clients?clientId=ncx-service") && \
+			_CLIENT_UUID=$$(printf '%s' "$$_CLIENTS_JSON" | jq -r 'if type == "array" and length > 0 then .[0].id else empty end') && \
+			if [ -n "$$_CLIENT_UUID" ]; then break; fi && \
+			echo "Waiting for Keycloak nico realm and ncx-service client... ($$attempt/30)" && \
+			sleep 5; \
+		done && \
+		[ -n "$$_CLIENT_UUID" ] || { echo "ERROR: Keycloak nico realm or ncx-service client is unavailable"; exit 1; } && \
 	_CLIENT_SECRET=$$(curl -sk -H "Authorization: Bearer $$_ADMIN_TOKEN" \
 		"$(KC_URL)/admin/realms/nico/clients/$$_CLIENT_UUID" | jq -r .secret) && \
 	TOKEN=$$(curl -sk -X POST "$(KC_URL)/realms/nico/protocol/openid-connect/token" \
@@ -317,7 +335,7 @@ vault-init: ## Initialize Vault PKI, AppRole, and KV secrets (one-time per clust
 	NS=nico-system && \
 	V=vault-0 && \
 	echo "Waiting for Vault pod..." && \
-	until oc get pod $$V -n $$NS -o jsonpath='{.status.phase}' 2>/dev/null | grep -q Running; do sleep 5; done && \
+	oc wait --for=condition=Ready pod/$$V -n $$NS --timeout=300s && \
 	if oc exec $$V -n $$NS -- vault status -tls-skip-verify -format=json 2>/dev/null | grep -q '"initialized".*true'; then \
 		echo "Vault already initialized" && \
 		if oc exec $$V -n $$NS -- vault status -tls-skip-verify -format=json 2>/dev/null | grep -q '"sealed".*true'; then \
@@ -460,9 +478,16 @@ endif
 			-o jsonpath='{.data.username}' | base64 -d) && \
 		_ADMIN_PASS=$$(oc get secret keycloak-admin-secret -n rhbk-operator \
 			-o jsonpath='{.data.password}' | base64 -d) && \
-		_ADMIN_TOKEN=$$(curl -sk -X POST "$(KC_URL)/realms/master/protocol/openid-connect/token" \
-			-d grant_type=password -d client_id=admin-cli \
-			-d "username=$$_ADMIN_USER" -d "password=$$_ADMIN_PASS" | jq -r .access_token) && \
+		_ADMIN_TOKEN="" && \
+		for attempt in $$(seq 1 30); do \
+			_ADMIN_TOKEN=$$(curl -sk -X POST "$(KC_URL)/realms/master/protocol/openid-connect/token" \
+				-d grant_type=password -d client_id=admin-cli \
+				-d "username=$$_ADMIN_USER" -d "password=$$_ADMIN_PASS" | jq -r '.access_token // empty') && \
+			if [ -n "$$_ADMIN_TOKEN" ] && [ "$$_ADMIN_TOKEN" != null ]; then break; fi && \
+			echo "Waiting for Keycloak master realm... ($$attempt/30)" && \
+			sleep 5; \
+		done && \
+		{ [ -n "$$_ADMIN_TOKEN" ] && [ "$$_ADMIN_TOKEN" != null ] || { echo "ERROR: failed to acquire Keycloak admin token"; exit 1; }; } && \
 		_CLIENT_UUID=$$(curl -sk -H "Authorization: Bearer $$_ADMIN_TOKEN" \
 			"$(KC_URL)/admin/realms/nico/clients?clientId=ncx-service" | jq -r '.[0].id') && \
 		_CLIENT_SECRET=$$(curl -sk -H "Authorization: Bearer $$_ADMIN_TOKEN" \
@@ -504,17 +529,34 @@ endif
 		$(NICO_SITE_AGENT_CHART) --wait --timeout 10m \
 		-f $(SITE_AGENT_VALUES) \
 		--set global.image.repository="$(IMAGE_REGISTRY)" \
-		--set global.image.tag="$(IMAGE_TAG)" \
+		$(if $(IMAGE_TAG),--set global.image.tag="$(IMAGE_TAG)") \
 		--set image.name="$(SITE_AGENT_IMAGE_NAME)" \
 		--set envConfig.CLUSTER_ID=$$SITE_ID_VAL \
 		--set envConfig.TEMPORAL_SUBSCRIBE_NAMESPACE=$$SITE_ID_VAL \
 		--set bootstrap.enabled=true
 
-deploy-rms: ## Deploy Rack Management Service (RMS)
+ensure-rms-pvc:
+	@printf '%s\n' \
+		'apiVersion: v1' \
+		'kind: PersistentVolumeClaim' \
+		'metadata:' \
+		'  name: rms-firmware' \
+		'  namespace: nico-system' \
+		'spec:' \
+		'  accessModes:' \
+		'    - ReadWriteOnce' \
+		'  resources:' \
+		'    requests:' \
+		'      storage: 1Gi' \
+		'  storageClassName: gp3-csi' \
+		| oc apply -f -
+
+deploy-rms: ensure-rms-pvc ## Deploy Rack Management Service (RMS)
 	helm upgrade --install -n nico-system rms \
 		$(RMS_UPSTREAM)/helm \
 		--wait --timeout 10m \
-		--set global.image.tag="$(IMAGE_TAG)"
+		-f $(RMS_VALUES) \
+		$(if $(IMAGE_TAG),--set global.image.tag="$(IMAGE_TAG)")
 
 # =============================================================================
 # Site scaffolding

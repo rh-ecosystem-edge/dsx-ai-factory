@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# No-hardware site profile. Persistence is intentionally in-memory, inbound RMS
+# gRPC stays TLS-enabled, and outbound switch mTLS is disabled because no
+# switches are being onboarded.
+global:
+  image:
+    tag: latest
+    pullPolicy: IfNotPresent
+
+databaseMode: memory
+
+namespace: nico-system
+
+apiServer:
+  image:
+    repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory/nv-rms
+  firmwarePersistentVolumeClaim: rms-firmware
+  insecureSwitch: true
+  tls:
+    enabled: true
+    caEnabled: true
+
+certificates:
+  enabled: true
+  issuerRef:
+    name: vault-nico-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io

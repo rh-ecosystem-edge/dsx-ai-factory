@@ -4,32 +4,6 @@ kind: Kustomization
 resources:
   - all.yaml
 
-# TEMPORARY — this patch should be removed, not kept as a permanent workaround.
-#
-# It strips the "boot-artifacts-permissions" initContainer that the
-# infra-controller nico-pxe chart adds whenever bootArtifactContainers is
-# non-empty (which charts/values/nico-core.yaml sets). That initContainer
-# needs UID 0 + CHOWN/FOWNER/DAC_OVERRIDE, which OpenShift's restricted-v2 SCC
-# rejects outright — the chart's own values.yaml documents this exact
-# limitation. Removing only this initContainer does NOT fix that: the
-# remaining `cp` init containers still copy the boot artifacts in, but nothing
-# chgrp/chmod's them for nico-pxe's non-root serving container (runAsUser/
-# runAsGroup 10001 by default in this chart version), so serving may still
-# fail with 403s depending on the source images' file permissions.
-#
-# Pick one real fix instead of patching around it:
-#   1. Bind a more permissive SCC to nico-pxe's ServiceAccount (e.g. a custom
-#      SCC granting CHOWN/FOWNER/DAC_OVERRIDE) so the chart's own permissions
-#      initContainer can run as designed. Requires explicit cluster-admin
-#      sign-off since it loosens security posture for that ServiceAccount.
-#   2. Bake the boot artifacts directly into the PXE image at build time
-#      (with correct group 10001 ownership baked in) and set
-#      bootArtifactContainers: [] in charts/values/nico-core.yaml, so the
-#      permissions initContainer is never added and no init-container copy
-#      step — privileged or not — is needed at all.
-# Once one of these is implemented, delete this kustomization directory and
-# drop the matching --post-renderer/--post-renderer-args wiring for
-# SITE_KUSTOMIZE in the Makefile's deploy-site target.
 patches:
   - target:
       kind: Deployment

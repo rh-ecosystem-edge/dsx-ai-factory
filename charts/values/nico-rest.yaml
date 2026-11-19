@@ -15,8 +15,7 @@ global:
     # Releases pin an immutable tag (see repo tags).
     # Each service overrides image.name below to the published
     # infra-controller-rest-* names (see .github/workflows/build.yml).
-    # Default tag latest
-    tag: v0.0.1
+    tag: 827e9e274-rh.1
   certificate:
     issuerRef:
       kind: ClusterIssuer
