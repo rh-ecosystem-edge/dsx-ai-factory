@@ -126,7 +126,6 @@ CLUSTER_DOMAIN ?= $(shell oc get ingresses.config.openshift.io cluster \
 POST_RENDERER_DIR := $(CURDIR)/scripts/kustomize-post-renderer
 POST_RENDERER     := kustomize-post-renderer
 export PATH       := $(POST_RENDERER_DIR):$(PATH)
-SITE_KUSTOMIZE    := $(CURDIR)/scripts/kustomize/nico-core
 
 # Keycloak and REST API URLs
 KC_URL  := https://keycloak-rhbk-operator.$(CLUSTER_DOMAIN)
@@ -454,8 +453,6 @@ deploy-site: ensure-ssh-host-key ## Deploy NICo Core (use SITE= to select per-si
 	helm upgrade --install -n nico-system nico-core \
 		$(NICO_CORE_CHART) --wait --timeout 10m \
 		-f $(NICO_CORE_VALUES) -f $(SITE_VALUES) \
-		--post-renderer kustomize-post-renderer \
-		--post-renderer-args $(SITE_KUSTOMIZE) \
 		--set global.image.repository="$(IMAGE_REGISTRY)/infra-controller-core" \
 		--set 'nico-api.certificate.extraDnsNames[0]=carbide-api.forge' \
 		--set 'nico-api.certificate.extraDnsNames[1]=nico-api-grpc-nico-system.$(CLUSTER_DOMAIN)' \
