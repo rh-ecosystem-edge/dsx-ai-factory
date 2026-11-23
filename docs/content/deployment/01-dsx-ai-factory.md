@@ -118,9 +118,21 @@ services.
 > UEFI/BIOS, kernel panics) to log files and can forward them to Loki/Grafana
 > through an optional OpenTelemetry sidecar. It is not required for provisioning.
 
-All four services share a single VIP (via MetalLB's `allow-shared-ip`), which
-works because their ports do not overlap. Any service that reuses a port already
-on the VIP needs its own VIP. 
+By default, each of the four services receives its own VIP. This avoids
+MetalLB `allow-shared-ip` constraints and keeps the DNS and DHCP options
+independent. For a legacy single-VIP deployment, set
+`DATAPLANE_VIP_MODE=shared` and `DATAPLANE_VIP`.
+
+Set these variables in `deploy.env`:
+
+```bash
+SITE=mysite
+DATAPLANE_API_VIP=192.0.2.10
+DATAPLANE_PXE_VIP=192.0.2.11
+DATAPLANE_DNS_VIP=192.0.2.12
+DATAPLANE_DHCP_VIP=192.0.2.13
+DATAPLANE_POOL=192.0.2.0/28
+```
 
 Create an `IPAddressPool` and `L2Advertisement` in the `metallb-system` namespace:
 

@@ -67,44 +67,122 @@ SITE_VALUES   ?= $(if $(SITE),charts/values/generated/nico-core-$(SITE).yaml,$(N
 PREREQS_VALUES   ?= $(wildcard charts/values/prereqs-$(SITE).yaml)
 SITE_INFRA_VALUES ?= $(if $(SITE),charts/values/generated/infra-site-$(SITE).yaml)
 
-# Data-plane MetalLB VIP (provisioning network). Resolved per site from deploy.env:
-#   DATAPLANE_VIP_MYSITE=172.16.10.100
-#   DATAPLANE_POOL_MYSITE=172.16.10.100-172.16.10.110
-#   DATAPLANE_NIC_MYSITE=ens1f0
-#   DATAPLANE_NODE_IP_MYSITE=172.16.10.2
-toupper = $(shell echo $(1) | tr a-z A-Z)
-DATAPLANE_VIP     ?= $(DATAPLANE_VIP_$(call toupper,$(SITE)))
-DATAPLANE_POOL    ?= $(DATAPLANE_POOL_$(call toupper,$(SITE)))
-DATAPLANE_NIC     ?= $(DATAPLANE_NIC_$(call toupper,$(SITE)))
-DATAPLANE_NODE_IP ?= $(DATAPLANE_NODE_IP_$(call toupper,$(SITE)))
+# Data-plane MetalLB VIPs (provisioning network). The default is one VIP per
+# service. Set the four service VIPs in deploy.env:
+#   DATAPLANE_API_VIP=172.16.10.100
+#   DATAPLANE_PXE_VIP=172.16.10.101
+#   DATAPLANE_DNS_VIP=172.16.10.102
+#   DATAPLANE_DHCP_VIP=172.16.10.103
+#   DATAPLANE_POOL=172.16.10.100-172.16.10.110
+#   DATAPLANE_NIC=ens1f0
+#   DATAPLANE_NODE_IP=172.16.10.2
+# A checkout that manages multiple sites can instead suffix each variable with
+# the uppercase SITE value, for example DATAPLANE_API_VIP_MYSITE. Set
+# DATAPLANE_VIP_MODE=shared and DATAPLANE_VIP for the legacy single-VIP mode.
+SITE_KEY := $(shell printf '%s' "$(SITE)" | tr '[:lower:]' '[:upper:]')
+DATAPLANE_VIP_MODE ?= per-service
+DATAPLANE_API_VIP  ?= $(strip $(DATAPLANE_API_VIP_$(SITE_KEY)))
+DATAPLANE_PXE_VIP  ?= $(strip $(DATAPLANE_PXE_VIP_$(SITE_KEY)))
+DATAPLANE_DNS_VIP  ?= $(strip $(DATAPLANE_DNS_VIP_$(SITE_KEY)))
+DATAPLANE_DHCP_VIP ?= $(strip $(DATAPLANE_DHCP_VIP_$(SITE_KEY)))
+DATAPLANE_VIP      ?= $(strip $(DATAPLANE_VIP_$(SITE_KEY)))
+DATAPLANE_POOL     ?= $(strip $(DATAPLANE_POOL_$(SITE_KEY)))
+DATAPLANE_NIC      ?= $(strip $(DATAPLANE_NIC_$(SITE_KEY)))
+DATAPLANE_NODE_IP  ?= $(strip $(DATAPLANE_NODE_IP_$(SITE_KEY)))
+
+DATAPLANE_SERVICE_VIP_COUNT := $(words \
+  $(if $(DATAPLANE_API_VIP),1) \
+  $(if $(DATAPLANE_PXE_VIP),1) \
+  $(if $(DATAPLANE_DNS_VIP),1) \
+  $(if $(DATAPLANE_DHCP_VIP),1))
+DATAPLANE_METALLB_REQUESTED := $(if $(DATAPLANE_VIP)$(DATAPLANE_SERVICE_VIP_COUNT),true)
+
+ifeq ($(filter $(DATAPLANE_VIP_MODE),per-service shared),)
+$(error DATAPLANE_VIP_MODE must be per-service or shared)
+endif
+
+ifeq ($(DATAPLANE_VIP_MODE),per-service)
+ifneq ($(DATAPLANE_SERVICE_VIP_COUNT),0)
+ifneq ($(DATAPLANE_SERVICE_VIP_COUNT),4)
+$(error per-service data-plane VIPs require DATAPLANE_API_VIP, DATAPLANE_PXE_VIP, DATAPLANE_DNS_VIP, and DATAPLANE_DHCP_VIP)
+endif
+endif
+endif
 
 MLB_ANN := externalService.annotations.metallb\.universe\.tf/loadBalancerIPs
-DATAPLANE_VIP_SET := \
+
+PER_SERVICE_DATAPLANE_VIP_SET := \
+  $(if $(DATAPLANE_API_VIP),\
+    --set 'nico-api.externalService.enabled=true' \
+    --set 'nico-api.externalService.externalTrafficPolicy=Local' \
+    --set-string 'nico-api.$(MLB_ANN)=$(DATAPLANE_API_VIP)' \
+    --set-string 'nico-api.certificate.ipAddresses[0]=$(DATAPLANE_API_VIP)' \
+    --set 'nico-pxe.externalService.enabled=true' \
+    --set 'nico-pxe.externalService.externalTrafficPolicy=Local' \
+    --set-string 'nico-pxe.$(MLB_ANN)=$(DATAPLANE_PXE_VIP)' \
+    --set 'unbound.externalService.enabled=true' \
+    --set-string 'unbound.$(MLB_ANN)=$(DATAPLANE_DNS_VIP)' \
+    --set 'nico-dhcp.externalService.enabled=true' \
+    --set-string 'nico-dhcp.$(MLB_ANN)=$(DATAPLANE_DHCP_VIP)' \
+    --set 'unbound.localData[0].name=carbide-pxe.forge' \
+    --set-string 'unbound.localData[0].addresses[0]=$(DATAPLANE_PXE_VIP)' \
+    --set 'unbound.localData[1].name=nico-pxe.forge' \
+    --set-string 'unbound.localData[1].addresses[0]=$(DATAPLANE_PXE_VIP)' \
+    --set 'unbound.localData[2].name=carbide-static-pxe.forge' \
+    --set-string 'unbound.localData[2].addresses[0]=$(DATAPLANE_PXE_VIP)' \
+    --set 'unbound.localData[3].name=carbide-api.forge' \
+    --set-string 'unbound.localData[3].addresses[0]=$(DATAPLANE_API_VIP)' \
+    --set-string 'nico-dhcp.config.kea.hookParameters.nameservers=$(DATAPLANE_DNS_VIP)' \
+    --set-string 'nico-dhcp.config.kea.hookParameters.provisioningServer=$(DATAPLANE_PXE_VIP)')
+
+# Legacy single-VIP mode. All services use the same address and must use
+# Kubernetes' default Cluster traffic policy so MetalLB permits sharing.
+SHARED_DATAPLANE_VIP_SET = \
   $(if $(DATAPLANE_VIP),\
+    --set 'nico-api.externalService.enabled=true' \
+    --set 'nico-api.externalService.externalTrafficPolicy=Cluster' \
     --set-string 'nico-api.$(MLB_ANN)=$(DATAPLANE_VIP)' \
     --set-string 'nico-api.certificate.ipAddresses[0]=$(DATAPLANE_VIP)' \
+    --set 'nico-pxe.externalService.enabled=true' \
+    --set 'nico-pxe.externalService.externalTrafficPolicy=Cluster' \
     --set-string 'nico-pxe.$(MLB_ANN)=$(DATAPLANE_VIP)' \
+    --set 'unbound.externalService.enabled=true' \
+    --set 'unbound.externalService.externalTrafficPolicy=Cluster' \
     --set-string 'unbound.$(MLB_ANN)=$(DATAPLANE_VIP)' \
+    --set 'nico-dhcp.externalService.enabled=true' \
+    --set 'nico-dhcp.externalService.externalTrafficPolicy=Cluster' \
     --set-string 'nico-dhcp.$(MLB_ANN)=$(DATAPLANE_VIP)' \
     --set 'nico-api.externalService.annotations.metallb\.universe\.tf/allow-shared-ip=nico-site-vip' \
     --set 'nico-pxe.externalService.annotations.metallb\.universe\.tf/allow-shared-ip=nico-site-vip' \
     --set 'unbound.externalService.annotations.metallb\.universe\.tf/allow-shared-ip=nico-site-vip' \
     --set 'nico-dhcp.externalService.annotations.metallb\.universe\.tf/allow-shared-ip=nico-site-vip' \
+    --set 'unbound.localData[0].name=carbide-pxe.forge' \
     --set-string 'unbound.localData[0].addresses[0]=$(DATAPLANE_VIP)' \
+    --set 'unbound.localData[1].name=nico-pxe.forge' \
     --set-string 'unbound.localData[1].addresses[0]=$(DATAPLANE_VIP)' \
+    --set 'unbound.localData[2].name=carbide-static-pxe.forge' \
+    --set-string 'unbound.localData[2].addresses[0]=$(DATAPLANE_VIP)' \
+    --set 'unbound.localData[3].name=carbide-api.forge' \
+    --set-string 'unbound.localData[3].addresses[0]=$(DATAPLANE_VIP)' \
     --set-string 'nico-dhcp.config.kea.hookParameters.nameservers=$(DATAPLANE_VIP)' \
     --set-string 'nico-dhcp.config.kea.hookParameters.provisioningServer=$(DATAPLANE_VIP)')
 
+DATAPLANE_VIP_SET = \
+  $(if $(filter shared,$(DATAPLANE_VIP_MODE)),$(SHARED_DATAPLANE_VIP_SET),$(PER_SERVICE_DATAPLANE_VIP_SET))
+
 DATAPLANE_INFRA_SET := \
-  $(if $(DATAPLANE_VIP),--set 'metallb.enabled=true') \
-  $(if $(DATAPLANE_POOL),--set-string 'metallb.addresses[0]=$(DATAPLANE_POOL)') \
-  $(if $(DATAPLANE_NIC),--set-string 'metallb.interfaces[0]=$(DATAPLANE_NIC)' \
+  $(if $(DATAPLANE_METALLB_REQUESTED),--set 'metallb.enabled=true') \
+  $(if $(DATAPLANE_POOL),\
+    --set-string 'metallb.addressPools[0].name=nico-site-vips' \
+    --set-string 'metallb.addressPools[0].addresses[0]=$(DATAPLANE_POOL)') \
+  $(if $(DATAPLANE_NIC),--set-string 'metallb.l2.interfaces[0]=$(DATAPLANE_NIC)' \
     --set-string 'nodeNetwork.enabled=true' \
     --set-string 'nodeNetwork.interface=$(DATAPLANE_NIC)') \
   $(if $(DATAPLANE_NODE_IP),--set-string 'nodeNetwork.address=$(DATAPLANE_NODE_IP)')
 
 DATAPLANE_PREREQS_SET := \
-  $(if $(DATAPLANE_VIP),--set 'metallb.enabled=true' --set 'nmstate.enabled=true')
+  $(if $(DATAPLANE_METALLB_REQUESTED),--set 'metallb.enabled=true') \
+  $(if $(DATAPLANE_NIC),--set 'nmstate.enabled=true')
 
 # Vault topology: auto-detected from schedulable node count (ha=>=3, standalone otherwise).
 # Force with VAULT_MODE=ha or VAULT_MODE=standalone.
@@ -154,7 +232,11 @@ help: ## Show this help
 	@echo ""
 	@echo "Site variables (set in deploy.env or on the CLI):"
 	@echo "  SITE=<name>          select per-site values (charts/values/generated/nico-core-<name>.yaml)"
-	@echo "  DATAPLANE_VIP=<ip>   MetalLB VIP for provisioning services"
+	@echo "  DATAPLANE_API_VIP=<ip>   NICo API MetalLB VIP"
+	@echo "  DATAPLANE_PXE_VIP=<ip>   NICo PXE MetalLB VIP"
+	@echo "  DATAPLANE_DNS_VIP=<ip>   NICo DNS MetalLB VIP"
+	@echo "  DATAPLANE_DHCP_VIP=<ip>  NICo DHCP MetalLB VIP"
+	@echo "  DATAPLANE_VIP_MODE=per-service|shared"
 	@echo "  VAULT_MODE=ha|standalone  override Vault topology detection"
 
 .DEFAULT_GOAL := help
@@ -576,10 +658,13 @@ create-site-values: ## Create per-site values files (SITE=<name> required)
 	@echo ""
 	@echo "Add to deploy.env:"
 	@echo "  SITE=$(SITE)"
-	@echo "  DATAPLANE_VIP_$(shell echo $(SITE) | tr a-z A-Z)=<your-vip>"
-	@echo "  DATAPLANE_POOL_$(shell echo $(SITE) | tr a-z A-Z)=<vip>/<prefix>"
-	@echo "  DATAPLANE_NIC_$(shell echo $(SITE) | tr a-z A-Z)=<provisioning-nic>"
-	@echo "  DATAPLANE_NODE_IP_$(shell echo $(SITE) | tr a-z A-Z)=<node-ip-on-provisioning-vlan>"
+	@echo "  DATAPLANE_API_VIP=<api-vip>"
+	@echo "  DATAPLANE_PXE_VIP=<pxe-vip>"
+	@echo "  DATAPLANE_DNS_VIP=<dns-vip>"
+	@echo "  DATAPLANE_DHCP_VIP=<dhcp-vip>"
+	@echo "  DATAPLANE_POOL=<vip>/<prefix>"
+	@echo "  DATAPLANE_NIC=<provisioning-nic>"
+	@echo "  DATAPLANE_NODE_IP=<node-ip-on-provisioning-vlan>"
 	@echo ""
 	@echo "Then: make deploy-dataplane-vip SITE=$(SITE)"
 
@@ -599,7 +684,11 @@ patch-ovn-gateway: ## Enable OVN local-gateway mode for secondary-NIC MetalLB VI
 
 deploy-dataplane-vip: ## Enable MetalLB data-plane VIPs for a site (SITE= required)
 	@[ -n "$(SITE)" ] || { echo "ERROR: SITE required"; exit 1; }
-	@[ -n "$(DATAPLANE_VIP)" ] || { echo "ERROR: DATAPLANE_VIP required"; exit 1; }
+ifeq ($(DATAPLANE_VIP_MODE),shared)
+	@[ -n "$(DATAPLANE_VIP)" ] || { echo "ERROR: DATAPLANE_VIP required in shared mode"; exit 1; }
+else
+	@[ "$(DATAPLANE_SERVICE_VIP_COUNT)" = 4 ] || { echo "ERROR: DATAPLANE_API_VIP, DATAPLANE_PXE_VIP, DATAPLANE_DNS_VIP, and DATAPLANE_DHCP_VIP required in per-service mode"; exit 1; }
+endif
 	@[ -n "$(DATAPLANE_POOL)" ] || { echo "ERROR: DATAPLANE_POOL required"; exit 1; }
 	@[ -n "$(DATAPLANE_NIC)" ] || { echo "ERROR: DATAPLANE_NIC required"; exit 1; }
 	@[ -n "$(DATAPLANE_NODE_IP)" ] || { echo "ERROR: DATAPLANE_NODE_IP required"; exit 1; }
