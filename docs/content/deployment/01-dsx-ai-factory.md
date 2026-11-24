@@ -122,6 +122,14 @@ All four services share a single VIP (via MetalLB's `allow-shared-ip`), which
 works because their ports do not overlap. Any service that reuses a port already
 on the VIP needs its own VIP. 
 
+When NICo runs with OpenShift DPF on a shared management cluster, DPF may
+already own the MetalLB operator and singleton MetalLB operand. Set
+`METALLB_MODE=dpf` so NICo reuses them instead of installing a second MetalLB.
+If DPUs reach the management cluster through OpenShift Routes rather than a
+data-plane VIP, run `make deploy-dpf-endpoints` after deploying NICo Core.
+Reference values are available in `charts/values/prereqs-dpf-example.yaml` and
+`charts/values/infra-site-dpf-example.yaml`.
+
 Create an `IPAddressPool` and `L2Advertisement` in the `metallb-system` namespace:
 
 ```yaml
