@@ -17,7 +17,7 @@ SHELL := /bin/bash
 .PHONY: help check-prereqs
 .PHONY: deploy-prereqs deploy-cloud-infra deploy-cloud deploy-all-cloud
 .PHONY: patch-keycloak-route bootstrap-org
-.PHONY: deploy-site-infra vault-init vault-admin-cert ensure-ssh-host-key deploy-site
+.PHONY: deploy-site-infra vault-init vault-admin-cert ensure-ssh-host-key deploy-site deploy-flow
 .PHONY: deploy-site-agent deploy-rms ensure-rms-pvc
 .PHONY: create-site-values patch-ovn-gateway deploy-dataplane-vip
 .PHONY: verify-prereqs-deployed verify-infra-deployed verify-core-deployed verify-dataplane-vip
@@ -461,7 +461,13 @@ deploy-site: ensure-ssh-host-key ## Deploy NICo Core (use SITE= to select per-si
 	@oc get route nico-api-grpc -n nico-system >/dev/null 2>&1 || \
 		oc create route passthrough nico-api-grpc --service=nico-api --port=grpc -n nico-system
 
-deploy-all-site: deploy-site-infra vault-init deploy-site ## Deploy all site components in sequence
+deploy-flow: ## Deploy nico-flow (PSM/NSM fabric task/policy/automation service)
+	helm upgrade --install -n nico-system nico-flow \
+		$(UPSTREAM)/helm/nico-flow --wait --timeout 5m \
+		-f $(NICO_CORE_VALUES) \
+		--set images.flow.repository="$(IMAGE_REGISTRY)/infra-controller-flow"
+
+deploy-all-site: deploy-site-infra vault-init deploy-site deploy-flow ## Deploy all site components in sequence
 
 deploy-site-agent: ## Register a site and deploy the REST site-agent (SITE_NAME=<name> or SITE_ID=<uuid>)
 ifndef SITE_ID
