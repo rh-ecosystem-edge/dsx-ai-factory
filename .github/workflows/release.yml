@@ -56,10 +56,6 @@ jobs:
               echo "${tag}"
             fi
           }
-          echo "infra_controller=$(component_version components/infra-controller infra-controller)" >> "$GITHUB_OUTPUT"
-          echo "nv_rms=$(component_version components/nv-rms nv-rms)"                             >> "$GITHUB_OUTPUT"
-          echo "nvsentinel=$(component_version components/nvsentinel nvsentinel)"                  >> "$GITHUB_OUTPUT"
-          echo "fia=$(component_version components/fia fia)"                                       >> "$GITHUB_OUTPUT"
           # health-validation uses toolkit/v* tags; extract the version part after the prefix
           hv_tag=$(git -C components/health-validation describe --tags --abbrev=0 --match='toolkit/v[0-9]*' 2>/dev/null \
             || git -C components/health-validation rev-parse --short HEAD)
@@ -67,7 +63,13 @@ jobs:
           if [ -s "patches/health-validation/PATCHES.md" ]; then
             hv_version="${hv_version}-rh.1"
           fi
-          echo "health_validation=${hv_version}" >> "$GITHUB_OUTPUT"
+          {
+            echo "infra_controller=$(component_version components/infra-controller infra-controller)"
+            echo "nv_rms=$(component_version components/nv-rms nv-rms)"
+            echo "nvsentinel=$(component_version components/nvsentinel nvsentinel)"
+            echo "fia=$(component_version components/fia fia)"
+            echo "health_validation=${hv_version}"
+          } >> "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------------
   # Publish infra-controller images
