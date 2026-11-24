@@ -97,7 +97,7 @@ DATAPLANE_SERVICE_VIP_COUNT := $(words \
   $(if $(DATAPLANE_PXE_VIP),1) \
   $(if $(DATAPLANE_DNS_VIP),1) \
   $(if $(DATAPLANE_DHCP_VIP),1))
-DATAPLANE_METALLB_REQUESTED := $(if $(DATAPLANE_VIP)$(DATAPLANE_SERVICE_VIP_COUNT),true)
+DATAPLANE_METALLB_REQUESTED := $(if $(DATAPLANE_VIP),true,$(if $(filter-out 0,$(DATAPLANE_SERVICE_VIP_COUNT)),true))
 
 ifeq ($(filter $(DATAPLANE_VIP_MODE),per-service shared),)
 $(error DATAPLANE_VIP_MODE must be per-service or shared)
