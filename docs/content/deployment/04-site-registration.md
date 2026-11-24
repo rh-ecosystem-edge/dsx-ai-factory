@@ -171,3 +171,7 @@ nico-rest  (enqueues a workflow)
 With NICo Core, the site-agent, and RMS running, the site is connected and ready
 to point at real hardware. Proceed to [Deploying RHEL](../02-rhel/) to provision
 the first AI Factory compute nodes.
+
+If this site provisions BlueField DPUs through OpenShift DPF rather than plain
+RHEL hosts, see [DPF Zero Trust with NICo](../05-dpf-zero-trust/) for the
+DPF/NICo handoff sequence and known lab caveats instead.
