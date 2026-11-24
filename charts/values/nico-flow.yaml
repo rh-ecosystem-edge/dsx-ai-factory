@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# Values override for upstream nico-flow chart (PSM/NSM fabric task, policy,
+# and automation service). Deployed in the nico-system namespace.
+#
+# nico-flow is a STANDALONE (type: application) chart — its values live at
+# the TOP LEVEL (.Values.database, .Values.temporal, ...), NOT nested under
+# a `nico-flow:` key. Nesting them silently falls back to chart defaults,
+# e.g. database.flow.credentialsSecret defaulting to the chart's placeholder
+# "flow.nico.nico-pg-cluster.credentials" instead of the real Crunchy PGO
+# secret — confirmed on nvd-srv-04 (CreateContainerConfigError: secret
+# "flow.nico.nico-pg-cluster.credentials" not found).
+# =============================================================================
+
+flowEnv: production
+
+images:
+  flow:
+    repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-flow
+    tag: v0.0.1
+
+database:
+  host: nico-site-pg-primary
+  port: 5432
+  certPath: ""
+  # Crunchy pguser secret exposes 'user'; chart default 'username' is Zalando's
+  # key name.
+  flow:
+    name: flow
+    usernameKey: user
+    credentialsSecret: nico-site-pg-pguser-nico
+
+nicoCoreApi:
+  url: nico-api:1079
+
+temporal:
+  host: temporal-frontend.nico-rest
+  port: 7233
+  namespace: flow
+  enableTls: true
+  serverName: interservice.server.temporal.local
+  certPath: /var/run/secrets/temporal-client-certs
+
+temporalCert:
+  enabled: true
+  issuerRef:
+    kind: ClusterIssuer
+    name: nico-rest-ca-issuer
+    group: cert-manager.io
+
+certificate:
+  apiIdentity:
+    namespace: nico-system
+    serviceName: nico-flow
+
+imagePullSecret:
+  create: false
+
+createNamespace: false

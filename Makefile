@@ -17,7 +17,7 @@ SHELL := /bin/bash
 .PHONY: help check-prereqs
 .PHONY: deploy-prereqs deploy-cloud-infra deploy-cloud deploy-all-cloud
 .PHONY: patch-keycloak-route bootstrap-org
-.PHONY: deploy-site-infra vault-init vault-admin-cert ensure-ssh-host-key deploy-site
+.PHONY: deploy-site-infra vault-init vault-admin-cert ensure-ssh-host-key deploy-site deploy-flow
 .PHONY: deploy-site-agent deploy-rms ensure-rms-pvc
 .PHONY: create-site-values patch-ovn-gateway deploy-dataplane-vip deploy-dpf-endpoints
 .PHONY: deploy-all-sites
@@ -575,7 +575,13 @@ deploy-dpf-endpoints: ## Create OpenShift Route endpoints for DPF-managed DPU ag
 			--hostname=carbide-pxe.forge --insecure-policy=Allow -n nico-system
 	@oc get routes carbide-api carbide-pxe -n nico-system
 
-deploy-all-site: deploy-site-infra vault-init deploy-site ## Deploy all site components in sequence
+deploy-flow: ## Deploy nico-flow (PSM/NSM fabric task/policy/automation service)
+	helm upgrade --install -n nico-system nico-flow \
+		$(UPSTREAM)/helm/nico-flow --wait --timeout 5m \
+		-f charts/values/nico-flow.yaml \
+		--set images.flow.repository="$(IMAGE_REGISTRY)/infra-controller-flow"
+
+deploy-all-site: deploy-site-infra vault-init deploy-site deploy-flow ## Deploy all site components in sequence
 
 deploy-all-sites: ## Deploy every site named in SITES
 	@[ -n "$(SITES)" ] || { echo "ERROR: SITES required, e.g. make deploy-all-sites SITES='site1 site2'"; exit 1; }
