@@ -464,7 +464,7 @@ deploy-site: ensure-ssh-host-key ## Deploy NICo Core (use SITE= to select per-si
 deploy-flow: ## Deploy nico-flow (PSM/NSM fabric task/policy/automation service)
 	helm upgrade --install -n nico-system nico-flow \
 		$(UPSTREAM)/helm/nico-flow --wait --timeout 5m \
-		-f $(NICO_CORE_VALUES) \
+		-f charts/values/nico-flow.yaml \
 		--set images.flow.repository="$(IMAGE_REGISTRY)/infra-controller-flow"
 
 deploy-all-site: deploy-site-infra vault-init deploy-site deploy-flow ## Deploy all site components in sequence
