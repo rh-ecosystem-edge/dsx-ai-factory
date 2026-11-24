@@ -134,6 +134,14 @@ DATAPLANE_DHCP_VIP=192.0.2.13
 DATAPLANE_POOL=192.0.2.0/28
 ```
 
+When NICo runs with OpenShift DPF on a shared management cluster, DPF may
+already own the MetalLB operator and singleton MetalLB operand. Set
+`METALLB_MODE=dpf` so NICo reuses them instead of installing a second MetalLB.
+If DPUs reach the management cluster through OpenShift Routes rather than a
+data-plane VIP, run `make deploy-dpf-endpoints` after deploying NICo Core.
+Reference values are available in `charts/values/prereqs-dpf-example.yaml` and
+`charts/values/infra-site-dpf-example.yaml`.
+
 Create an `IPAddressPool` and `L2Advertisement` in the `metallb-system` namespace:
 
 ```yaml

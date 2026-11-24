@@ -109,6 +109,7 @@ spec:
               oc wait --for=condition=Established crd metallbs.metallb.io --timeout=120s
               oc wait --for=condition=Established crd ipaddresspools.metallb.io --timeout=120s
               echo "MetalLB CRDs available"
+              {{- if .Values.metallb.createInstance }}
               echo "Creating MetalLB instance operand..."
               cat <<EOMLB | oc apply -f -
               apiVersion: metallb.io/v1beta1
@@ -118,6 +119,7 @@ spec:
                 namespace: {{ .Values.metallb.namespace }}
               spec: {}
               EOMLB
+              {{- end }}
               echo "Waiting for MetalLB controller (webhook) to be ready..."
               until oc -n {{ .Values.metallb.namespace }} get deploy/controller > /dev/null 2>&1; do
                 sleep 5

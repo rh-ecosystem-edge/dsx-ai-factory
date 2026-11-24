@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Example site-infra values when OpenShift DPF owns the cluster-wide MetalLB
+# operator and singleton MetalLB operand. NICo owns only the address pool and
+# advertisement for its site-facing services.
+
+metallb:
+  enabled: true
+  namespace: openshift-operators
+  mode: l2
+  addressPools:
+    - name: nico-site-vips
+      addresses:
+        - 192.0.2.100-192.0.2.110
+      autoAssign: false
+  l2:
+    interfaces:
+      - ens1f0
+
+nodeNetwork:
+  enabled: true
+  interface: ens1f0
+  address: 192.0.2.2
+  prefixLength: 24
