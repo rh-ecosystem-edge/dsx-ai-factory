@@ -10,8 +10,9 @@
 # defaults (helm -f infra-site-<site>.yaml ...); see that file for the full
 # documented schema, including the l2 vs bgp trade-offs and nodeNetwork.
 #
-# Every VIP pinned on a nico-core Service (via DATAPLANE_VIP_<SITE> in
-# deploy.env) MUST fall inside one of the addressPools ranges below.
+# Every per-service VIP (DATAPLANE_API_VIP, DATAPLANE_PXE_VIP,
+# DATAPLANE_DNS_VIP, and DATAPLANE_DHCP_VIP in deploy.env) MUST fall inside
+# one of the addressPools ranges below.
 # =============================================================================
 
 metallb:

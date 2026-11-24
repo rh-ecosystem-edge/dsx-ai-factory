@@ -350,44 +350,7 @@ unbound:
   #   - name: carbide-api.forge
   #     addresses: ["<NICO_API_LB_IP>"]
 
-nico-flow:
-  enabled: true
-  createNamespace: false
-  flowEnv: production
-  images:
-    flow:
-      repository: ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-flow
-      tag: v0.0.1
-  database:
-    host: nico-site-pg-primary
-    port: 5432
-    certPath: ""
-    # Crunchy pguser secret exposes 'user'; the fork reads the key name from
-    # database.flow.usernameKey (note the .flow. level), chart default 'username'.
-    flow:
-      name: flow
-      usernameKey: user
-      credentialsSecret: nico-site-pg-pguser-nico
-  nicoCoreApi:
-    url: nico-api:1079
-  temporal:
-    host: temporal-frontend.nico-rest
-    port: 7233
-    namespace: flow
-    enableTls: true
-    serverName: interservice.server.temporal.local
-    certPath: /var/run/secrets/temporal-client-certs
-  temporalCert:
-    enabled: true
-    issuerRef:
-      kind: ClusterIssuer
-      name: nico-rest-ca-issuer
-      group: cert-manager.io
-  vault:
-    address: https://vault.nico-system:8200
-  certificate:
-    apiIdentity:
-      namespace: nico-system
-      serviceName: nico-flow
-  imagePullSecret:
-    create: false
+# nico-flow is a standalone chart, not a subchart of this umbrella — its
+# values live in charts/values/nico-flow.yaml at the top level, not nested
+# under a `nico-flow:` key here (nesting silently falls back to chart
+# defaults; see that file's header comment for the failure mode).

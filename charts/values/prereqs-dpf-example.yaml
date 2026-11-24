@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Example prerequisite values when OpenShift DPF already installed MetalLB.
+# The chart waits for the existing CRDs but does not install another operator
+# or singleton MetalLB operand.
+
+metallb:
+  enabled: true
+  manageOperator: false
+  createInstance: false
+  namespace: openshift-operators

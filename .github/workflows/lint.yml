@@ -1,0 +1,52 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Dockerfile and GitHub Actions workflow linting.
+
+name: Lint
+
+on:
+  pull_request:
+    branches:
+      - main
+      - nico-next
+      - '[0-9][0-9].[0-9][0-9]'
+    paths:
+      - 'docker/**'
+      - '.github/workflows/**'
+  push:
+    branches: [main]
+    paths:
+      - 'docker/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+jobs:
+  hadolint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run hadolint
+        run: |
+          set -euo pipefail
+          lint_failed=0
+          while IFS= read -r -d '' f; do
+            echo "::group::hadolint $f"
+            # error-only: this fleet's Dockerfiles carry pre-existing style
+            # warnings (DL3007 latest-tag, etc.) that are a separate cleanup,
+            # not something a new lint gate should block on.
+            docker run --rm -i hadolint/hadolint hadolint --failure-threshold error - < "$f" || lint_failed=1
+            echo "::endgroup::"
+          done < <(find docker -iname 'Dockerfile*' -print0)
+          exit "$lint_failed"
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest -color
