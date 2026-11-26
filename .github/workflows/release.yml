@@ -311,7 +311,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Publish upstream component charts as OCI artifacts
-  # (nico, nico-rest, rack-manager — referenced by nic-core deployment)
+  # (nico, nico-rest, rack-manager, topograph — referenced by deployments)
   # ---------------------------------------------------------------------------
   publish-component-charts:
     runs-on: ubuntu-latest
@@ -351,6 +351,7 @@ jobs:
           push_chart components/infra-controller/helm
           push_chart components/infra-controller/helm/rest/nico-rest
           push_chart components/nv-rms/helm
+          push_chart components/topograph/charts/topograph
 
   # ---------------------------------------------------------------------------
   # Publish our Helm charts (cloud-infra, site-infra, prereqs)

@@ -52,6 +52,14 @@ monitoring (DCGM Exporter) by encoding NVIDIA's expert thresholds into
 CEL-based rules, so downstream systems can act on the exit code or JSON result
 without writing custom alerting rules.
 
+**[Topograph](https://github.com/dsx-ai-factory/topograph)** discovers the
+physical network topology of a cluster (NVLink domains, InfiniBand/Ethernet
+switch fabric, and cloud rack topology) and exposes that information to
+workload schedulers via Kubernetes node labels. It enables topology-aware
+scheduling for distributed GPU workloads, so frameworks like Kueue and the
+kube-scheduler can place jobs on nodes that share the same network domain,
+minimizing cross-switch traffic.
+
 ### OLM operators (prerequisites)
 
 | Operator | Purpose |
