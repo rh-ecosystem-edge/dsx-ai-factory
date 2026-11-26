@@ -1,0 +1,161 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# LaunchPad GB300 NVL72 — DPU site overlay for tray-6/tray-7.
+# Per-service MetalLB VIPs (nico-api/.pxe/.dhcp + unbound/.dns) are wired by
+# the Makefile's DATAPLANE_*_VIP flags, not hardcoded here.
+
+nico-api:
+  dpf:
+    rbacCreate: true
+  siteConfig:
+    enabled: true
+    nicoApiSiteConfig: |
+      initial_domain_name = "nico.local"
+
+      # Security settings — DISABLED for this LaunchPad test environment.
+      attestation_enabled = false
+      tpm_required = false
+
+      [bmc_proxy]
+      enabled = true
+      address = "nico-bmc-proxy.nico-system.svc.cluster.local:1079"
+
+      # dpu_policy = "manage" is the flag that enables DPU provisioning —
+      # without it Core only discovers DPUs but never provisions them.
+      [site_explorer]
+      run_interval = "30s"
+      allow_zero_dpu_hosts = true
+      dpu_policy = "manage"
+
+      # Admin overlay — DPU-served DHCP for managed hosts.
+      [networks.nvl72-admin]
+      type = "admin"
+      prefix = "192.0.2.0/24"
+      gateway = "192.0.2.1"
+      mtu = 9000
+      reserve_first = 5
+
+      # Underlay provisioning — physical DPU provisioning network. Must be the
+      # full physical 172.16.3.0/24: Core matches a relayed DHCP discover to a
+      # segment by checking whether the relay's giaddr (172.16.3.2, csl-01's
+      # vlan300 SVI) falls inside the segment's prefix. A narrower segment
+      # would exclude that giaddr and Core would never match any relayed
+      # request.
+      [networks.nvl72-underlay]
+      type = "underlay"
+      prefix = "172.16.3.0/24"
+      gateway = "172.16.3.1"
+      mtu = 1500
+      reserve_first = 4
+
+      # Management underlay — DPU BMC/OOB network (VLAN 200 / 172.16.2.0/24).
+      [networks.nvl72-mgmt-underlay]
+      type = "underlay"
+      prefix = "172.16.2.0/24"
+      gateway = "172.16.2.1"
+      mtu = 1500
+      reserve_first = 5
+
+      [pools.lo-ip]
+      type = "ipv4"
+      ranges = [{ start = "192.168.126.100", end = "192.168.126.150" }]
+
+      [pools.vpc-dpu-lo]
+      type = "ipv4"
+      ranges = [{ start = "10.101.0.1", end = "10.101.0.254" }]
+
+      [pools.secondary-vtep-ip]
+      type = "ipv4"
+      ranges = [{ start = "10.102.0.1", end = "10.102.0.254" }]
+
+      [pools.vni]
+      type = "integer"
+      ranges = [{ start = "100000", end = "199999" }]
+
+      [pools.vpc-vni]
+      type = "integer"
+      ranges = [{ start = "0", end = "100" }]
+
+      [pools.external-vpc-vni]
+      type = "integer"
+      ranges = [{ start = "300000", end = "399999" }]
+
+      [pools.vlan-id]
+      type = "integer"
+      ranges = [{ start = "100", end = "4094" }]
+
+      # NICo owns the DPUDeployment/BFB/DPUFlavor/DPUService objects instead of
+      # DPF (requires NICO_ENABLED=true on the openshift-dpf side too).
+      [dpf]
+      enabled = true
+
+      # Chart source is a public GHCR OCI registry (real, publicly-trusted
+      # TLS cert — DPF's native pre-check has no custom-CA option, so a
+      # self-signed in-cluster repo would need a DPF config change we're
+      # deliberately avoiding). Images stay on quay.io/szigmon/nico — not
+      # NGC, which returns HTTP 403 for these without a carbide-dev
+      # entitlement. All content is the same proven in the nvd-srv-04 E2E
+      # run (2026-11-08), just the chart delivery host has changed.
+      [dpf.services.dpu_agent]
+      name = "carbide-dpu-agent"
+      helm_repo_url = "oci://ghcr.io/szigmon/nico-dpf-fixed-charts"
+      helm_chart = "nico-dpu-agent"
+      helm_version = "0.1.11"
+      docker_repo_url = "quay.io/szigmon/nico"
+      docker_image_tag = "forge-dpu-agent-dpf-zt-20261020"
+      docker_image_pull_secret = "dpf-pull-secret"
+
+      [dpf.services.dpu_agent.extra_helm_values]
+      hostNetwork = true
+      dpuClusterName = "doca"
+
+      # LaunchPad has real per-service MetalLB VIPs on the same 172.16.3.0/24
+      # segment as the DPU p0 interfaces, so the agent can reach NICo's API
+      # directly over its VIP — no NodePort/hostAliases workaround needed here.
+      [dpf.services.dpu_agent.extra_helm_values.forgeSystem]
+      apiServer = "https://172.16.3.250"
+
+      # This lab's RHCOS DPU image has no /usr/sbin/lldpcli.
+      [dpf.services.dpu_agent.extra_helm_values.lldpSidecar]
+      enabled = false
+
+      [dpf.services.dhcp_server]
+      name = "carbide-dhcp-server"
+      helm_repo_url = "oci://ghcr.io/szigmon/nico-dpf-fixed-charts"
+      helm_chart = "nico-dhcp-server"
+      helm_version = "0.1.0"
+      docker_repo_url = "quay.io/szigmon/nico"
+      docker_image_tag = "forge-dhcp-server-dpf-zt-20261020"
+      docker_image_pull_secret = "dpf-pull-secret"
+
+      # Allow the DHCP service to write its host-mounted config under OpenShift SELinux.
+      [dpf.services.dhcp_server.extra_helm_values.securityContext.seLinuxOptions]
+      type = "spc_t"
+
+      [dpf.services.fmds]
+      name = "carbide-fmds"
+      helm_repo_url = "oci://ghcr.io/szigmon/nico-dpf-fixed-charts"
+      helm_chart = "nico-fmds"
+      helm_version = "0.1.0"
+      docker_repo_url = "quay.io/szigmon/nico"
+      docker_image_tag = "carbide-fmds-dpf-zt-20261020"
+      docker_image_pull_secret = "dpf-pull-secret"
+
+      [dpf.services.otel]
+      name = "carbide-otelcol"
+      helm_repo_url = "oci://ghcr.io/szigmon/nico-dpf-fixed-charts"
+      helm_chart = "nico-otelcol"
+      helm_version = "0.1.1"
+      docker_repo_url = "quay.io/szigmon/nico"
+      docker_image_tag = "otelcol-contrib-dpf-zt-20261020"
+      docker_image_pull_secret = "dpf-pull-secret"
+
+      [dpf.services.otel.extra_helm_values.transceiverExporter.image]
+      repository = "quay.io/szigmon/nico"
+      tag = "transceiver-exporter-dpf-zt-20261020"
+
+# nico-dhcp's Kea subnet4 default (0.0.0.0/0 catch-all, full-range pool)
+# already matches what the old repo used for this same environment — no
+# override needed. DNS/PXE hook parameters (nameservers, provisioningServer)
+# are set automatically by the Makefile's per-service DATAPLANE_*_VIP flags.

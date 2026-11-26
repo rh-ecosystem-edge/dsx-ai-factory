@@ -8,7 +8,7 @@ Established; the address pools / advertisements / BGP peers live in
 helm/infra-site (values.metallb), which is deployed after this chart.
 */}}
 
-{{- if .Values.metallb.enabled }}
+{{- if and .Values.metallb.enabled .Values.metallb.manageOperator }}
 apiVersion: v1
 kind: Namespace
 metadata:

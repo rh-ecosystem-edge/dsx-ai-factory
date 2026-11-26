@@ -45,6 +45,10 @@ externalSecrets:
 # Address pools, L2Advertisements, and BGP peers are configured separately.
 metallb:
   enabled: true
+  # Set false when DPF already installed the cluster-wide MetalLB operator.
+  manageOperator: true
+  # Set false when DPF already created the singleton MetalLB operand.
+  createInstance: true
   channel: stable
   source: redhat-operators
   sourceNamespace: openshift-marketplace

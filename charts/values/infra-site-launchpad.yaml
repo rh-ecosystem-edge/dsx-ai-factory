@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Red Hat, Inc. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# LaunchPad GB300 NVL72 site values. DPF already owns the MetalLB operator and
+# a singleton operand in openshift-operators (for its own bfb-registry-vip
+# pool) — this chart only adds NICo's own pool/advertisement alongside it.
+#
+# nodeNetwork is disabled: the dataplane interface is a pre-existing LACP
+# bond (bond-ns, 172.16.3.249/24, EVPN-multihomed) built directly on the host,
+# not a plain ethernet NIC — this chart's node-network.yaml template only
+# supports type: ethernet, so letting it manage bond-ns would misconfigure it.
+# MetalLB only needs to announce on the existing interface, not create it.
+
+metallb:
+  enabled: true
+  namespace: openshift-operators
+  mode: l2
+  addressPools:
+    - name: nico-site-vips
+      addresses:
+        - 172.16.3.250-172.16.3.253
+      autoAssign: false
+  l2:
+    interfaces:
+      - bond-ns
+
+nodeNetwork:
+  enabled: false
