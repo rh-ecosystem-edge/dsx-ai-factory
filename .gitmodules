@@ -13,3 +13,6 @@
 [submodule "components/health-validation"]
 	path = components/health-validation
 	url = https://github.com/dsx-ai-factory/health-validation
+[submodule "components/topograph"]
+	path = components/topograph
+	url = https://github.com/dsx-ai-factory/topograph

@@ -17,6 +17,7 @@ upstream release tags. Renovate opens bump PRs automatically (unless in patch st
 | `components/nvsentinel` | NVSentinel | [NVIDIA/NVSentinel](https://github.com/NVIDIA/NVSentinel) |
 | `components/fia` | NVIDIA Fleet Intelligence Agent | [dsx-ai-factory/fleet-intelligence-agent](https://github.com/dsx-ai-factory/fleet-intelligence-agent) |
 | `components/health-validation` | NVIDIA Health Validation | [dsx-ai-factory/health-validation](https://github.com/dsx-ai-factory/health-validation) |
+| `components/topograph` | Topograph | [dsx-ai-factory/topograph](https://github.com/dsx-ai-factory/topograph) |
 
 **Deployed via OLM** — OpenShift-certified operators consumed from Red Hat's
 OperatorHub. No submodule; referenced by OLM `Subscription` manifests in the

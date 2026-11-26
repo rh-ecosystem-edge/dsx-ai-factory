@@ -13,6 +13,7 @@ components.
 | NVSentinel | [NVIDIA/NVSentinel](https://github.com/NVIDIA/NVSentinel) | [docs.nvidia.com/nvsentinel](https://docs.nvidia.com/nvsentinel) |
 | NVIDIA Fleet Intelligence Agent | [dsx-ai-factory/fleet-intelligence-agent](https://github.com/dsx-ai-factory/fleet-intelligence-agent) | [docs.nvidia.com/fleet-intel](https://docs.nvidia.com/fleet-intel) |
 | NVIDIA Health Validation | [dsx-ai-factory/health-validation](https://github.com/dsx-ai-factory/health-validation) | [docs.nvidia.com/health-validation](https://docs.nvidia.com/health-validation) |
+| Topograph | [dsx-ai-factory/topograph](https://github.com/dsx-ai-factory/topograph) | [docs.nvidia.com/topograph](https://docs.nvidia.com/topograph) |
 | NVIDIA GPU Operator | [NVIDIA/gpu-operator](https://github.com/NVIDIA/gpu-operator) | [docs.nvidia.com/.../openshift](https://docs.nvidia.com/datacenter/cloud-native/openshift/latest/index.html) |
 | NVIDIA Network Operator | [Mellanox/network-operator](https://github.com/Mellanox/network-operator) | [docs.nvidia.com/networking](https://docs.nvidia.com/networking/display/kubernetes2641/index.html) |
 

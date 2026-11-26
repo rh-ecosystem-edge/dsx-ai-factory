@@ -37,6 +37,9 @@ jobs:
           - name: health-validation
             upstream: dsx-ai-factory/health-validation
             path: components/health-validation
+          - name: topograph
+            upstream: dsx-ai-factory/topograph
+            path: components/topograph
           - name: gpu-operator
             upstream: NVIDIA/gpu-operator
             path: components/gpu-operator
