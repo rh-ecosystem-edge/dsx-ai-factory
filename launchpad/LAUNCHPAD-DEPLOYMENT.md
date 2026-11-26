@@ -53,6 +53,21 @@ properly-trusted cert for the chart source matters regardless of ArgoCD.
 
 ---
 
+## Important: which NICo Core image this was validated against
+
+`make deploy-site` doesn't currently pass `IMAGE_TAG`, so the Core chart
+silently falls back to the placeholder `v0.0.1` tag — which, as of
+2026-11-26, resolves to a `nico-core` build from **2026-10-22**
+(`ghcr.io/rh-ecosystem-edge/dsx-ai-factory/infra-controller-core:v0.0.1`,
+commit `5b5089df0`). This predates PR #2 (the main NICo+external-DPF
+integration work, merged 2026-11-12) and PR #3. Everything in this guide
+was validated against that Oct 22 binary — it proves the configuration and
+chart-delivery approach works, **not** that PR #2/#3 or the combined
+`openshift-dpf` automation PR specifically work, since that code wasn't
+running. To actually exercise those, rebuild and push a `nico-core` image
+from the intended branch/commit and set `global.image.repository`/tag
+accordingly, or pass `IMAGE_TAG` explicitly to `deploy-site`.
+
 ## Prerequisites (must already be true before deploying)
 
 - DPF Zero Trust platform installed (`dpf-operator-system` namespace
@@ -151,6 +166,68 @@ Change visibility → Public → confirm by typing the package name.
 Visibility changes can take a minute or two to propagate — if a check right
 after changing it still shows `private`, wait and recheck before assuming
 it failed.
+
+### Manual step: nico-dhcp MAC allowlist
+
+Restricts `nico-dhcp`'s Kea server to only answer known DPU p0 MACs — not
+strictly required (dnsmasq doesn't conflict on this bastion, see above),
+but recommended defense-in-depth before expected-machine registration.
+`nico-dhcp-config`'s actual key is `kea_config.json` (not `kea-dhcp4.conf`,
+despite some older docs referencing that name):
+
+```bash
+oc get configmap nico-dhcp-config -n nico-system -o json > /tmp/current-kea-config.json
+python3 - <<'PYEOF'
+import json
+with open("/tmp/current-kea-config.json") as f:
+    cm = json.load(f)
+kea = json.loads(cm["data"]["kea_config.json"])
+kea["Dhcp4"]["client-classes"] = [{
+    "name": "known-dpus",
+    "test": "substring(hexstring(pkt4.mac,':'),0,17) == 'e0:9d:73:87:03:70' or substring(hexstring(pkt4.mac,':'),0,17) == 'e0:9d:73:86:d4:52'",
+    "only-if-required": False
+}]
+kea["Dhcp4"]["subnet4"][0]["pools"][0]["client-class"] = "known-dpus"
+kea["Dhcp4"]["subnet4"][0]["reservations"] = [
+    {"hw-address": "e0:9d:73:87:03:70", "ip-address": "172.16.3.240", "hostname": "tray-6-dpu"},
+    {"hw-address": "e0:9d:73:86:d4:52", "ip-address": "172.16.3.241", "hostname": "tray-7-dpu"}
+]
+cm["data"]["kea_config.json"] = json.dumps(kea)
+with open("/tmp/patched-kea-config.json", "w") as f:
+    json.dump(cm, f)
+PYEOF
+oc apply -f /tmp/patched-kea-config.json
+oc rollout restart deployment/nico-dhcp -n nico-system
+oc rollout status deployment/nico-dhcp -n nico-system --timeout=90s
+```
+
+Applied and verified live on 2026-11-26 — `nico-dhcp` came back healthy
+with the allowlist active.
+
+### Manual step: Vault BMC credential seeding (not yet done)
+
+`secrets/machines/bmc/` only has a generic `site/root` entry as of
+2026-11-26 — none of the 8 per-MAC credentials (4 DPU + 4 host, tray-6/7)
+are seeded. This needs the real site BMC passwords and is deliberately left
+for a human to do, not automated:
+
+```bash
+export VAULT_NS=nico-system
+export VAULT_POD=vault-0
+VAULT_TOKEN=$(oc get secret vault-unseal-secret -n $VAULT_NS -o jsonpath='{.data.root-token}' | base64 -d)
+
+for MAC in "e0:9d:73:87:03:85" "E0:9D:73:87:03:85" \
+           "e0:9d:73:86:d4:67" "E0:9D:73:86:D4:67"; do
+  oc exec $VAULT_POD -n $VAULT_NS -- sh -c \
+    "export VAULT_TOKEN=$VAULT_TOKEN VAULT_SKIP_VERIFY=true && \
+     printf '{\"UsernamePassword\":{\"username\":\"root\",\"password\":\"<REAL_DPU_BMC_PASSWORD>\"}}' \
+     | vault kv put secrets/machines/bmc/$MAC/root -"
+done
+# Repeat with the host BMC MACs/credentials (admin user, host BMC password).
+```
+
+Replace `<REAL_DPU_BMC_PASSWORD>` with the actual site credential — never
+commit a real password into this file or any script.
 
 ### Manual step: expected-machine registration (point of no return)
 
